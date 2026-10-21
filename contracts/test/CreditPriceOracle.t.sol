@@ -161,16 +161,47 @@ contract CreditPriceOracleTest is BaseTest {
         assertGe(latest, (uint256(0.55e18) * 98) / 100);
     }
 
-    function test_breaker_stale_fallsBackToFaceValue_thenRestartsFromOneDollar() public {
+    // Replaced (with the owner's approval, 2026-10-21) the earlier "restarts from $1" test: after an
+    // outage the oracle now resumes from the last good price instead of a 30-hour warm-up from $1.
+    function test_breaker_stale_fallsBackToFaceValue_thenResumesFromLastGoodPrice() public {
         _converge();
         vm.warp(block.timestamp + 2 hours + 1);
         assertFalse(po.isFresh());
         assertEq(po.getPrice(address(credit)), 1e18, "stale -> $1");
 
         (CreditPriceOracle.ReadingStatus s, uint256 recorded) = _read(0.55e18);
+        assertEq(uint8(s), uint8(CreditPriceOracle.ReadingStatus.Accepted));
+        assertEq(recorded, 0.55e18, "resumes at the last good price");
+        assertEq(po.getPrice(address(credit)), 0.55e18, "old history cleared; no $1 warm-up");
+    }
+
+    /// Market fell during the outage: the move must be confirmed, then it is still speed-limited.
+    function test_breaker_stale_marketFellDuringOutage_fallsAtMost2Percent() public {
+        _converge();
+        vm.warp(block.timestamp + 6 hours);
+        assertEq(po.getPrice(address(credit)), 1e18);
+
+        (CreditPriceOracle.ReadingStatus s,) = _read(0.40e18); // -27% vs the last reading
+        assertEq(uint8(s), uint8(CreditPriceOracle.ReadingStatus.RejectedDivergent));
+        assertEq(po.getPrice(address(credit)), 1e18, "still stale until a reading is recorded");
+
+        vm.warp(block.timestamp + 5 minutes);
+        uint256 recorded;
+        (s, recorded) = _read(0.40e18);
         assertEq(uint8(s), uint8(CreditPriceOracle.ReadingStatus.Clamped));
-        assertEq(recorded, 0.98e18, "history restarts from $1");
-        assertEq(po.getPrice(address(credit)), 0.98e18);
+        assertEq(recorded, 0.539e18, "$0.55 less at most 2%");
+    }
+
+    /// Market rose during the outage: once confirmed, the higher price is used at once.
+    function test_breaker_stale_marketRoseDuringOutage_adoptedWhenConfirmed() public {
+        _converge();
+        vm.warp(block.timestamp + 6 hours);
+        _read(0.70e18); // +27%: rejected, needs confirmation
+        vm.warp(block.timestamp + 5 minutes);
+        (CreditPriceOracle.ReadingStatus s, uint256 recorded) = _read(0.70e18);
+        assertEq(uint8(s), uint8(CreditPriceOracle.ReadingStatus.Accepted));
+        assertEq(recorded, 0.70e18);
+        assertEq(po.getPrice(address(credit)), 0.70e18);
     }
 
     function test_exchangeDown_updateReverts_priceKeepsWorking() public {

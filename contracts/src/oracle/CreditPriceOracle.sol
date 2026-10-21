@@ -35,8 +35,10 @@ import {IOrbioExchange} from "../interfaces/IOrbioExchange.sol";
 ///         HOW THE PRICE IS READ (`getPrice`, view, stored state only)
 ///         - Time-weighted average of recorded observations over the last `twapWindow`.
 ///         - Stale: no recorded observation within `maxStaleness` -> $1 face value.
-///         - After staleness (and at deployment) the history restarts from the $1 reference and
-///           comes down under the speed limit. Warm-up from $1 to ~$0.55 takes ~30 hours at 2%/h.
+///         - At deployment there is no history, so the price starts from $1 and comes down under
+///           the speed limit (warm-up from $1 to ~$0.55 takes ~30 hours at 2%/h).
+///         - After staleness the old history is cleared and the price resumes from the last good
+///           recording, still under the speed limit (it can fall at most 2% on the first reading).
 ///
 ///         Liquidations call `getPrice`, which never touches the live book, so nobody can move the
 ///         book and liquidate in the same transaction.
@@ -156,7 +158,9 @@ contract CreditPriceOracle is IPriceOracle {
             return (ReadingStatus.RejectedDivergent, 0);
         }
 
-        // Speed limit relative to the latest recorded price, or to $1 if the history is stale/empty.
+        // Speed limit relative to the latest recorded price. After an outage the old history is
+        // cleared, but the price resumes from the last good recording (still under the speed
+        // limit) rather than from $1. Only a brand-new oracle, with no recording ever, starts at $1.
         uint256 refPrice;
         uint256 elapsed;
         if (_isFresh()) {
@@ -165,10 +169,12 @@ contract CreditPriceOracle is IPriceOracle {
             elapsed = block.timestamp - last.timestamp;
         } else {
             if (_count != 0) {
+                refPrice = _observations[_newest].price;
                 _count = 0;
                 emit HistoryRestarted(block.timestamp);
+            } else {
+                refPrice = FACE_VALUE;
             }
-            refPrice = FACE_VALUE;
             elapsed = 1 hours;
         }
         if (elapsed > 1 hours) elapsed = 1 hours;
