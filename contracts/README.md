@@ -73,6 +73,7 @@ The exchange keeps no price history, so the oracle takes its own readings. `upda
 - Fee-on-transfer behavior is rejected (`_pullExact`), because CREDIT and USDG are both upgradeable proxies.
 - Pausing never blocks repay, liquidate, lender withdrawals or collateral withdrawals. Only the timelocked owner can unpause.
 - New borrows are rejected above 90% utilization, keeping a liquidity buffer for lenders.
+- **Borrow caps** (`setBorrowCaps`, timelocked owner) limit debt per account and in total, so every position stays liquidatable at a profit on the thin $CREDIT book (see below). They block only *new* borrowing: interest may take a position above a cap, and repaying, withdrawing and liquidating are never blocked. Default is unlimited; the deploy script sets them.
 - **One unpriceable asset can't freeze an account.** An asset whose price can't be read counts as $0. Borrowing and withdrawing are judged on the collateral that *can* be priced, and liquidators can seize any priceable collateral. Repay always works.
 - Invariants fuzzed (`test/invariant`): cash and collateral fully backed, total borrows equal to the sum of account debts, no debt without collateral, and a share price that never drops unless bad debt is realized.
 
@@ -81,12 +82,23 @@ The exchange keeps no price history, so the oracle takes its own readings. `upda
 - **$CREDIT** (`0xe333…004c`): 6 decimals, a UUPS proxy (OrbioCreditV5). Orbio can upgrade it, and that trust assumption can't be removed. The pool never calls `activate`.
 - **USDG** (6 decimals) is also an upgradeable proxy. There is no trustworthy on-chain USDG/USD feed, so USDG stays fixed at $1, and **the oracle can't see a USDG depeg.** The mitigation is the guardian pausing borrows and collateral deposits.
 - **The oracle needs someone to call `update()`.** If nobody does for 2 hours, the price falls back to $1 *while the outage lasts*, and borrowers liquidated during it lose more than the market cost of their debt (lenders are unaffected). Once readings resume, the price returns to the last good price straight away.
-- **Liquidation size vs. book depth (must be resolved before launch).** The settlement price reflects a 5,000-CREDIT purchase. Live quotes on 2026-10-21 cost $0.510 all-in per CREDIT for 5,000 (5.0% liquidator margin), $0.5345 for 25,000 (0.2%), and $0.548 for 50,000 (−2.2%). One purchase can't exceed ~55,000 CREDIT (64-order limit), and the whole book holds ~202,000 CREDIT. So liquidating more than ~25,000 CREDIT at once loses money for the liquidator. The deploy script's 1M USDG supply cap would allow ~700,000 CREDIT of debt, more than three times the entire book. Position sizes need to be matched to book depth, for example with per-account or total borrow caps (spec §8, "utilization caps").
+- **Liquidation size vs. book depth (addressed with borrow caps; revisit regularly).** The settlement price reflects a 5,000-CREDIT purchase, and bigger purchases walk up the book. Liquidator margin by liquidation size, live book at block 94,212,109 (2026-10-21):
+
+  | Size (CREDIT) | 5,000–12,500 | 15,000 | 20,000 | 25,000 | 30,000 | 40,000 |
+  |---|---|---|---|---|---|---|
+  | Margin | 5.0% | 4.6% | 2.6% | 1.1% | 0.1% | −1.1% |
+
+  One purchase can't exceed ~55,000 CREDIT (64-order limit), and the whole book held ~202,000 CREDIT. **Launch caps** (`Deploy.s.sol`):
+  - **20,000 CREDIT per account.** A typical liquidation closes half (10,000, 5% margin); a full close still earns ~2.6%.
+  - **50,000 CREDIT in total**, about a quarter of the book, so even several positions failing together can be liquidated over a few hours as the oracle follows the book up.
+  - **USDG collateral cap 200,000.** 50,000 CREDIT of debt needs at least ~71,500 USDG.
+
+  The book changes daily. The timelock can raise the caps as it deepens, and the agent should track margin by size (priority 3).
 - **Residual manipulation risk.** Anyone can place cheap sell orders and cancel them in the same transaction. Someone who wins *every* reading slot with consistent fake readings can still drag the recorded price down, by at most 2% per hour. The liquidator's margin within the reference size is ~5%, so a sustained attack of about 2.5 hours could make even small liquidations unprofitable until honest readings resume. The agent's monitoring (priority 3/6) must alert on this. A stronger defense (requiring a reading to be confirmed in a later block by a *different* caller's reading) is a possible follow-up.
 - **When the price is $1 or near it,** Orbio's buyer fee can exceed the 5% liquidation bonus. If the fee were raised to its 10% maximum, liquidating near face value would be unprofitable.
 - **Seizing an unpriceable asset itself is impossible.** If a borrower's *only* collateral is unpriceable, liquidation waits until its price returns.
 - **`Deploy.s.sol` still deploys the v1 `FixedPriceOracle`.** Switching to `CreditPriceOracle` is a timelocked `CollateralManager.setOracle` step, and the deploy script is not updated yet.
-- After deployment, `CollateralManager` ownership is **pending** until the timelock executes `acceptOwnership()`.
+- After deployment, `CollateralManager` **and** `CreditLendPool` ownership are **pending** until the timelock executes `acceptOwnership()` on each. Until then the deployer still owns them. The deployer holds them only to list USDG and set the borrow caps in the same deployment.
 - Not audited yet.
 
 ## Next (spec §9)

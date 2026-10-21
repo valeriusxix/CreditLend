@@ -95,6 +95,16 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     ///         a position in full.
     uint256 public minDebt;
 
+    /// @notice Max debt one account may reach through NEW borrowing. Keeps any single liquidation
+    ///         within what the thin $CREDIT order book can supply at a profit. Interest may push an
+    ///         existing position above it; that never blocks repaying, withdrawing or liquidation.
+    ///         Unlimited until set (the deploy script sets it).
+    uint256 public maxDebtPerAccount = type(uint256).max;
+
+    /// @notice Max total borrows the pool will reach through NEW borrowing, sized to $CREDIT
+    ///         order-book depth so all positions could be liquidated if needed. Unlimited until set.
+    uint256 public maxTotalBorrows = type(uint256).max;
+
     bool public depositsPaused;
     bool public borrowsPaused;
     bool public collateralDepositsPaused;
@@ -147,6 +157,7 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     event ReserveFactorUpdated(uint256 reserveFactorBps);
     event MaxUtilizationUpdated(uint256 maxUtilizationBps);
     event MinDebtUpdated(uint256 minDebt);
+    event BorrowCapsUpdated(uint256 maxDebtPerAccount, uint256 maxTotalBorrows);
     event GuardianUpdated(address indexed guardian);
     event PauseStateUpdated(bool depositsPaused, bool borrowsPaused, bool collateralDepositsPaused);
     event Skimmed(address indexed token, address indexed to, uint256 amount);
@@ -165,6 +176,8 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     error InsufficientCollateralBalance();
     error UtilizationCapExceeded();
     error DebtBelowMinimum();
+    error AccountDebtCapExceeded();
+    error TotalBorrowCapExceeded();
     error NoDebt();
     error PositionHealthy();
     error AssetNotAccepted();
@@ -386,9 +399,11 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
 
         uint256 newDebt = _debtOf(msg.sender, borrowIndex) + amount;
         if (newDebt < minDebt) revert DebtBelowMinimum();
+        if (newDebt > maxDebtPerAccount) revert AccountDebtCapExceeded();
 
         // A borrow moves cash into borrows, so lender assets stay the same.
         uint256 newTotalBorrows = totalBorrows + amount;
+        if (newTotalBorrows > maxTotalBorrows) revert TotalBorrowCapExceeded();
         uint256 lenderAssets = _lenderAssets(cash, totalBorrows, totalReserves);
         if (newTotalBorrows * BPS > lenderAssets * maxUtilizationBps) revert UtilizationCapExceeded();
 
@@ -556,6 +571,13 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     function setMinDebt(uint256 newMinDebt) external onlyOwner {
         minDebt = newMinDebt;
         emit MinDebtUpdated(newMinDebt);
+    }
+
+    /// @notice Sets the borrow caps ($CREDIT base units). They only limit new borrowing.
+    function setBorrowCaps(uint256 newMaxDebtPerAccount, uint256 newMaxTotalBorrows) external onlyOwner {
+        maxDebtPerAccount = newMaxDebtPerAccount;
+        maxTotalBorrows = newMaxTotalBorrows;
+        emit BorrowCapsUpdated(newMaxDebtPerAccount, newMaxTotalBorrows);
     }
 
     function setGuardian(address newGuardian) external onlyOwner {

@@ -14,9 +14,10 @@ import {FixedPriceOracle} from "../src/oracle/FixedPriceOracle.sol";
 /// Usage (simulation only, no broadcast):
 ///   ADMIN_MULTISIG=0x... GUARDIAN=0x... forge script script/Deploy.s.sol --fork-url robinhood
 ///
-/// After deployment, the CollateralManager ownership transfer is PENDING: the timelock must
-/// schedule + execute `CollateralManager.acceptOwnership()` (Ownable2Step). Until then the deployer
-/// remains its owner. The pool is owned by the timelock from construction.
+/// After deployment, the CollateralManager AND CreditLendPool ownership transfers are PENDING: the
+/// timelock must schedule + execute `acceptOwnership()` on each (Ownable2Step). Until then the
+/// deployer remains their owner. The deployer owns them briefly only to list USDG and set the
+/// borrow caps in the same deployment.
 contract Deploy is Script {
     address constant CREDIT = 0xE33322DA1380e61E5Ae5DfB21e7f62924c73004C;
     address constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
@@ -34,11 +35,17 @@ contract Deploy is Script {
     uint256 constant MAX_UTILIZATION_BPS = 9_000; // 90%
     uint256 constant MIN_DEBT = 10e6; // 10 CREDIT
 
-    // USDG collateral: "start tight"
+    // Borrow caps, sized to Orbio order-book depth measured 2026-10-21 (block 94,212,109): liquidating
+    // 20,000 CREDIT at once still earned liquidators 2.6% (10,000, a typical half-close, 5%); the
+    // whole book held ~202,000 CREDIT. Revisit as the book deepens.
+    uint256 constant MAX_DEBT_PER_ACCOUNT = 20_000e6;
+    uint256 constant MAX_TOTAL_BORROWS = 50_000e6;
+
+    // USDG collateral: "start tight". 50,000 CREDIT of debt needs >= ~71,500 USDG at 70% LTV.
     uint16 constant USDG_LTV_BPS = 7_000;
     uint16 constant USDG_LT_BPS = 8_000;
     uint16 constant USDG_BONUS_BPS = 500;
-    uint256 constant USDG_SUPPLY_CAP = 1_000_000e6;
+    uint256 constant USDG_SUPPLY_CAP = 200_000e6;
 
     function run() external {
         address admin = vm.envAddress("ADMIN_MULTISIG");
@@ -70,14 +77,19 @@ contract Deploy is Script {
             IERC20Metadata(CREDIT),
             cm,
             irm,
-            address(timelock),
+            msg.sender,
             guardian,
             RESERVE_FACTOR_BPS,
             MAX_UTILIZATION_BPS,
             MIN_DEBT
         );
+        pool.setBorrowCaps(MAX_DEBT_PER_ACCOUNT, MAX_TOTAL_BORROWS);
+        pool.transferOwnership(address(timelock));
 
         vm.stopBroadcast();
+
+        require(pool.maxDebtPerAccount() == MAX_DEBT_PER_ACCOUNT && pool.maxTotalBorrows() == MAX_TOTAL_BORROWS);
+        require(pool.pendingOwner() == address(timelock) && cm.pendingOwner() == address(timelock));
 
         console.log("TimelockController", address(timelock));
         console.log("FixedPriceOracle  ", address(oracle));
