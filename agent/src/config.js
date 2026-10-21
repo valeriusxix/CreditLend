@@ -39,7 +39,7 @@ export function loadConfig(env = process.env) {
     minProfitBps: Number(env.LIQUIDATOR_MIN_PROFIT_BPS || '100'),
     rateProposalsEnabled: bool(env.RATE_PROPOSALS_ENABLED),
 
-    llm: env.ORBIO_API_KEY ? { apiKey: env.ORBIO_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, model: env.AGENT_MODEL || 'claude-opus-5-5' } : null,
+    llm: env.ORBIO_API_KEY ? { apiKey: env.ORBIO_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, model: env.AGENT_MODEL || 'anthropic/claude-opus-5.5' } : null,
 
     alerts: {
       webhookUrl: env.ALERT_WEBHOOK_URL || null,

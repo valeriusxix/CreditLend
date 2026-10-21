@@ -85,10 +85,12 @@ export function decideProposal({ recommendation, labels, currentLabel, rateState
   return { action: 'propose', model: labels[target].address, target }
 }
 
-/// Default LLM call through the Orbio gateway (Anthropic Messages API). The SDK reads ANTHROPIC_BASE_URL
-/// from the environment; the key is the Orbio API key. Every call is paid in CREDIT from that balance.
+/// Default LLM call through the Orbio gateway (Anthropic Messages format at ANTHROPIC_BASE_URL). Orbio names
+/// models "anthropic/claude-opus-5.5" (see GET https://api.orbio.so/api/v1/models). The Orbio key is sent as
+/// both x-api-key and a Bearer token, since the gateway documents Bearer for its own tools. Every call is
+/// paid in CREDIT from the Orbio balance.
 export function orbioCompleter({ apiKey, baseURL, model }) {
-  const client = new Anthropic({ apiKey, baseURL, maxRetries: 2 })
+  const client = new Anthropic({ apiKey, authToken: apiKey, baseURL, maxRetries: 2 })
   return async (system, user) => {
     const response = await client.messages.create({
       model,

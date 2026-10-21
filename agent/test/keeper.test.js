@@ -202,3 +202,23 @@ test('a broken LLM answer never proposes', async () => {
   assert.ok(!chain.writes.some((w) => w[0] === 'propose'))
   assert.ok(alerts.some((a) => /no usable answer/.test(a.text)))
 })
+
+test('a TooSoon revert as viem really reports it (name only on the nested error) is not an alert', async () => {
+  const chain = fakeChain({ simulate: { ok: false, errorName: 'TooSoon', error: 'The contract function "update" reverted.' } })
+  const { keeper, alerts } = setup({ chain })
+  await keeper.init()
+  const r = await keeper.tick()
+  assert.equal(chain.writes.length, 0)
+  assert.equal(alerts.length, 0)
+  assert.equal(r.mode, 'slow', 'a race with another reader is not a failure')
+})
+
+test('without a RateController the daily report still arrives', async () => {
+  const complete = async () => ({ text: '{"decision":"keep","reason":"steady","report":"All quiet."}', stopReason: 'end_turn' })
+  const { keeper, chain, alerts } = setup({ complete, config: { rateController: null, rateProposalsEnabled: true } })
+  chain.rateState = async () => { throw new Error('must not be called') }
+  await keeper.init()
+  await keeper.tick()
+  assert.ok(alerts.some((a) => /All quiet\./.test(a.text)))
+  assert.ok(!alerts.some((a) => a.key === 'review-failed'))
+})

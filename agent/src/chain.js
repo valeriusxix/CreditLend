@@ -1,6 +1,6 @@
 // Every blockchain read and write the agent makes, in one place. The keeper only talks to this adapter,
 // so tests replace it with a fake and never touch the network.
-import { createPublicClient, createWalletClient, defineChain, http, maxUint256 } from 'viem'
+import { createPublicClient, createWalletClient, defineChain, http, BaseError, ContractFunctionRevertedError } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { poolAbi, collateralManagerAbi, oracleAbi, rateControllerAbi, rateModelAbi, exchangeAbi, erc20Abi, READING_STATUS, MAX_FILLS } from './abis.js'
 
@@ -11,6 +11,14 @@ export function robinhoodChain(rpcUrl) {
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     rpcUrls: { default: { http: [rpcUrl] } },
   })
+}
+
+/// Name of the custom error a contract call reverted with (e.g. "TooSoon"), or null. viem keeps it on a
+/// nested error, not in the short message.
+export function revertName(err) {
+  if (!(err instanceof BaseError)) return null
+  const inner = err.walk((e) => e instanceof ContractFunctionRevertedError)
+  return inner?.data?.errorName ?? null
 }
 
 // eth_getLogs on this RPC accepts at most ~10M blocks per call with an address filter.
@@ -80,7 +88,7 @@ export class ChainAdapter {
       const { result } = await this.client.simulateContract({ address: this.cfg.oracle, abi: oracleAbi, functionName: 'update', account: this.account ?? undefined })
       return { ok: true, status: READING_STATUS[result[0]], recordedPrice: result[1] }
     } catch (err) {
-      return { ok: false, error: err?.shortMessage ?? String(err) }
+      return { ok: false, errorName: revertName(err), error: err?.shortMessage ?? String(err) }
     }
   }
 
@@ -176,10 +184,11 @@ export class ChainAdapter {
     return this._read(token, erc20Abi, 'balanceOf', [this.address])
   }
 
+  /// Approves exactly `amount` (never unlimited: the Orbio exchange is upgradeable by Orbio).
   async ensureAllowance(token, spender, amount) {
     const current = await this._read(token, erc20Abi, 'allowance', [this.address, spender])
     if (current >= amount) return null
-    return this._write(token, erc20Abi, 'approve', [spender, maxUint256])
+    return this._write(token, erc20Abi, 'approve', [spender, amount])
   }
 
   buyCredit(usdgIn, minCreditOut) {

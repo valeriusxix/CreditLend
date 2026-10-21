@@ -186,7 +186,7 @@ export class Keeper {
     this.lastAttemptAt = now
     const sim = await this.chain.simulateUpdate()
     if (!sim.ok) {
-      if (/TooSoon/.test(sim.error)) return // someone else just read; try again next slot
+      if (sim.errorName === 'TooSoon' || /TooSoon/.test(sim.error)) return // someone else just read; try again next slot
       this.lastAttemptFailed = true
       await this.alerter.send({ key: 'reading-sim-failed', level: 'warn', text: `Oracle reading would fail: ${sim.error}` })
       return
@@ -236,7 +236,9 @@ export class Keeper {
 
   async _review(now, oracle) {
     try {
-      const [market, rateState] = await Promise.all([this.chain.market(), this.chain.rateState()])
+      // Without a RateController the review still writes its report; it just can't propose anything.
+      const noController = { models: [], agent: ZERO, pending: { model: ZERO, executableAt: 0 }, lastExecutedAt: 0, cooldown: 0, gracePeriod: 0 }
+      const [market, rateState] = await Promise.all([this.chain.market(), this.cfg.rateController ? this.chain.rateState() : noController])
       const labels = labelModels(rateState.models)
       const currentLabel = labels ? labelOf(labels, market.interestRateModel) : null
       const snapshot = buildSnapshot({ market, currentLabel, utilizationHistory: this.utilizationHistory, bookRows: this.bookRows, oracle, rateState, now })

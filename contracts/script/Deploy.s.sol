@@ -32,7 +32,8 @@ contract Deploy is Script {
 
     uint256 constant TIMELOCK_DELAY = 2 days;
 
-    // $CREDIT price oracle (approved 2026-10-21). Needs update() every ~5 minutes; a new oracle
+    // $CREDIT price oracle (approved 2026-10-21). Needs update() at least hourly (the agent reads hourly, every
+    // 5 minutes when anything looks off; the price falls back to $1 after 2 hours without one). A new oracle
     // starts at $1 and takes ~30 hours of readings to come down to the market price.
     uint256 constant ORACLE_REFERENCE_SIZE = 5_000e6; // price of buying 5,000 CREDIT, fee included
     uint256 constant ORACLE_MIN_INTERVAL = 5 minutes;
@@ -161,7 +162,7 @@ contract Deploy is Script {
 
         console.log("TimelockController", address(timelock));
         console.log("FixedPriceOracle  ", address(baseOracle), "(USDG = $1)");
-        console.log("CreditPriceOracle ", address(oracle), "(call update() every ~5 minutes)");
+        console.log("CreditPriceOracle ", address(oracle), "(run the agent: ../agent)");
         console.log("CollateralManager ", address(cm));
         console.log("InterestRateModel ", address(irm));
         console.log("CreditLendPool    ", address(pool));
