@@ -51,7 +51,7 @@ Sources: the verified source of the live contracts on Sourcify (OrbioCreditV5 im
 
 ## How the $CREDIT price works (`CreditPriceOracle`)
 
-The exchange keeps no price history, so the oracle takes its own readings. `update()` is permissionless and can be called once per 5 minutes. The agent will call it from priority 3.
+The exchange keeps no price history, so the oracle takes its own readings. `update()` is permissionless and can be called once per 5 minutes. The agent (`../agent`) calls it hourly while things are calm and every 5 minutes as soon as anything looks off (see the agent README).
 
 1. **Reading:** the oracle asks the book what buying **5,000 CREDIT** costs right now, *including Orbio's buyer fee*. That is the real all-in cost a liquidator pays, so for liquidations up to about that size, the liquidator keeps the full 5% bonus even if Orbio raises its fee. Larger liquidations pay more per CREDIT; see limitations. The result is capped at $1.
 2. **Circuit breakers:**
@@ -99,7 +99,7 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
 
 - **$CREDIT** (`0xe333…004c`): 6 decimals, a UUPS proxy (OrbioCreditV5). Orbio can upgrade it, and that trust assumption can't be removed. The pool never calls `activate`.
 - **USDG** (6 decimals) is also an upgradeable proxy. There is no trustworthy on-chain USDG/USD feed, so USDG stays fixed at $1, and **the oracle can't see a USDG depeg.** The mitigation is the guardian pausing borrows and collateral deposits.
-- **The oracle needs someone to call `update()`.** If nobody does for 2 hours, the price falls back to $1 *while the outage lasts*, and borrowers liquidated during it lose more than the market cost of their debt (lenders are unaffected). Once readings resume, the price returns to the last good price straight away.
+- **The oracle needs someone to call `update()`.** The agent does; anyone else may too. If nobody does for 2 hours, the price falls back to $1 *while the outage lasts*, and borrowers liquidated during it lose more than the market cost of their debt (lenders are unaffected). Once readings resume, the price returns to the last good price straight away.
 - **Liquidation size vs. book depth (addressed with borrow caps; revisit regularly).** The settlement price reflects a 5,000-CREDIT purchase, and bigger purchases walk up the book. Liquidator margin by liquidation size, live book at block 94,212,109 (2026-10-21):
 
   | Size (CREDIT) | 5,000–12,500 | 15,000 | 20,000 | 25,000 | 30,000 | 40,000 |
@@ -111,8 +111,8 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
   - **50,000 CREDIT in total**, about a quarter of the book, so even several positions failing together can be liquidated over a few hours as the oracle follows the book up.
   - **USDG collateral cap 200,000.** 50,000 CREDIT of debt needs at least ~71,500 USDG.
 
-  The book changes daily. The timelock can raise the caps as it deepens, and the agent should track margin by size (priority 3).
-- **Residual manipulation risk.** Anyone can place cheap sell orders and cancel them in the same transaction. Someone who wins *every* reading slot with consistent fake readings can still drag the recorded price down, by at most 2% per hour. The liquidator's margin within the reference size is ~5%, so a sustained attack of about 2.5 hours could make even small liquidations unprofitable until honest readings resume. The agent's monitoring (priority 3/6) must alert on this. A stronger defense (requiring a reading to be confirmed in a later block by a *different* caller's reading) is a possible follow-up.
+  The book changes daily. The timelock can raise the caps as it deepens. The agent measures margin by size every hour and warns when the caps are too big for the book.
+- **Residual manipulation risk.** Anyone can place cheap sell orders and cancel them in the same transaction. Someone who wins *every* reading slot with consistent fake readings can still drag the recorded price down, by at most 2% per hour. The liquidator's margin within the reference size is ~5%, so a sustained attack of about 2.5 hours could make even small liquidations unprofitable until honest readings resume. The agent alerts on this and switches to a reading every 5 minutes the moment anyone else posts a reading, so it contests every slot instead of leaving most of them empty. A stronger defense (requiring a reading to be confirmed in a later block by a *different* caller's reading) is a possible follow-up.
 - **When the price is $1 or near it,** Orbio's buyer fee can exceed the 5% liquidation bonus. If the fee were raised to its 10% maximum, liquidating near face value would be unprofitable.
 - **Seizing an unpriceable asset itself is impossible.** If a borrower's *only* collateral is unpriceable, liquidation waits until its price returns.
 - **`Deploy.s.sol` deploys `CreditPriceOracle`** (with a `FixedPriceOracle` holding only USDG = $1 as its base). After deployment someone must call `update()` about every 5 minutes. Until then, and for the ~30-hour warm-up, the $CREDIT settlement price sits at or near $1.
@@ -121,5 +121,5 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
 
 ## Next (spec §9)
 
-3. Agent program (`../agent`): keeps the oracle fed, watches positions, the book and the readings, and proposes rate switches through `RateController`.
-4. Orbio launchpad funding.
+4. Orbio launchpad funding for the agent (spec §7).
+5. Frontend.

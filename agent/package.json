@@ -1,0 +1,17 @@
+{
+  "name": "creditlend-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "CreditLend keeper and assistant agent: feeds the price oracle, watches positions and the order book, liquidates (optional) and reviews rates daily.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "once": "node --env-file-if-exists=.env src/index.js --once",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
+    "viem": "2.57.3"
+  }
+}
