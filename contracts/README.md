@@ -1,13 +1,13 @@
 # CreditLend contracts
 
 A fully collateralized $CREDIT lending market on Robinhood Chain (4663).
-`../Agent.Md` is the spec. This folder implements **build priority 1** (the core pool, collateral, interest accrual and liquidation, all on-chain) and **build priority 2** (the $CREDIT price oracle).
+`../Agent.Md` is the spec. This folder implements **build priority 1** (the core pool, collateral, interest accrual and liquidation, all on-chain), **build priority 2** (the $CREDIT price oracle) and the on-chain half of **build priority 3** (the agent's rate switch). The agent program itself is in `../agent`.
 
 ```
 forge build
 forge test              # unit + fuzz + invariant (16k randomized calls); no internet needed
 FOUNDRY_PROFILE=fork forge test -vv   # on request: live-chain test against the real Orbio Exchange
-ADMIN_MULTISIG=0x.. GUARDIAN=0x.. forge script script/Deploy.s.sol --fork-url robinhood   # dry run
+ADMIN_MULTISIG=0x.. GUARDIAN=0x.. AGENT=0x.. forge script script/Deploy.s.sol --fork-url robinhood   # dry run
 ```
 
 `test/fork/OrbioExchangeFork.t.sol` reads the live Orbio Exchange and needs internet access, so the normal `forge test` skips it (configured in `foundry.toml`).
@@ -22,8 +22,9 @@ ADMIN_MULTISIG=0x.. GUARDIAN=0x.. forge script script/Deploy.s.sol --fork-url ro
 | `LiquidationLogic` (library) | Health factor, close factor, seize math | No |
 | `CreditPriceOracle` | $CREDIT settlement price from the Orbio order book, with circuit breakers; passes other assets to a base oracle | No |
 | `FixedPriceOracle` | Immutable fixed prices. v1 oracle; now the base oracle for USDG = $1 | No |
+| `RateController` | The agent's only on-chain power: switching between timelock-approved rate models, with a public delay | No |
 
-Owner of the pool and CollateralManager = `TimelockController` (2-day delay). The guardian can only **pause** risk-increasing actions.
+Owner of the pool, CollateralManager and RateController = `TimelockController` (2-day delay). The guardian can only **pause** risk-increasing actions and **cancel** a pending rate switch. The agent can only **propose** a rate switch from the menu.
 
 ## Design decisions (agreed 2026-10-20 / 2026-10-21)
 
@@ -62,6 +63,23 @@ The exchange keeps no price history, so the oracle takes its own readings. `upda
 3. **Price used by liquidations:** the time-weighted average of the last **hour** of recorded readings. This reads stored data only, never the live book, so nobody can move the book and liquidate in the same transaction.
 
 **Warm-up (deployment only):** a brand-new oracle has no history, so it starts from $1 and comes down under the speed limit. From $1 to ~$0.55 takes about 30 hours. That is harmless in practice: new positions start well inside their limits and can't become unhealthy that fast. After an outage there is no warm-up; readings resume from the last good price.
+
+## The agent's rate switch (`RateController`)
+
+The spec lets the agent tune interest rates (§4.1, §8). It does so only through `RateController`, which the pool names as its `rateController`: the one address besides the timelock allowed to call `setInterestRateModel`.
+
+1. **A fixed menu.** The timelock approves rate models in advance. The deploy script approves three:
+
+   | Model | Base rate | Up to the kink | Kink | Above the kink | Max rate |
+   |---|---|---|---|---|---|
+   | Lower (attract borrowers) | 1% | +6% | 70% | +120% | 127% |
+   | **Normal** (starts active) | 2% | +10% | 65% | +150% | 162% |
+   | Higher (attract lenders) | 4% | +15% | 60% | +200% | 219% |
+
+2. **Announced 6 hours ahead.** The agent proposes; anyone can execute once 6 hours have passed (within the following 24 hours, after which the proposal expires). Users see every rate change coming.
+3. **At most one switch per 24 hours**, counted from the last executed switch. One proposal can be pending at a time.
+4. **The guardian or timelock can cancel** a pending switch. If the timelock removes a model from the menu, a pending switch to it can no longer execute.
+5. **No other power.** The agent can't touch funds, collateral rules, caps, prices or the menu. The timelock can still set any model directly, set a new agent, or unset the controller.
 
 ## Safety properties
 
@@ -103,4 +121,5 @@ The exchange keeps no price history, so the oracle takes its own readings. `upda
 
 ## Next (spec §9)
 
-3. Agent role: calls `CreditPriceOracle.update()` every 5 minutes, monitors positions and readings, and makes bounded, delayed rate-model updates through `setInterestRateModel`. No access to funds.
+3. Agent program (`../agent`): keeps the oracle fed, watches positions, the book and the readings, and proposes rate switches through `RateController`.
+4. Orbio launchpad funding.

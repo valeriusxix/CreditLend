@@ -84,6 +84,11 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     /// @notice May pause risk-increasing actions. Cannot unpause, move funds or change parameters.
     address public guardian;
 
+    /// @notice Besides the owner, the only address allowed to call `setInterestRateModel`: the
+    ///         RateController, which lets the agent pick from a timelock-approved menu of models after
+    ///         a public delay. It has no other power. Unset (zero) means owner only.
+    address public rateController;
+
     /// @notice Share of accrued interest kept as protocol reserves (first-loss bad-debt buffer).
     uint256 public reserveFactorBps;
 
@@ -159,6 +164,7 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     event MinDebtUpdated(uint256 minDebt);
     event BorrowCapsUpdated(uint256 maxDebtPerAccount, uint256 maxTotalBorrows);
     event GuardianUpdated(address indexed guardian);
+    event RateControllerUpdated(address indexed rateController);
     event PauseStateUpdated(bool depositsPaused, bool borrowsPaused, bool collateralDepositsPaused);
     event Skimmed(address indexed token, address indexed to, uint256 amount);
 
@@ -547,7 +553,9 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     // ---------------------------------------------------------------------------------------------
 
     /// @notice Swaps the rate model. Accrues first so the old rate applies up to this block.
-    function setInterestRateModel(IInterestRateModel newModel) external onlyOwner {
+    ///         Callable by the owner or the rate controller; anyone else gets the usual Ownable revert.
+    function setInterestRateModel(IInterestRateModel newModel) external {
+        if (msg.sender != rateController) _checkOwner();
         if (address(newModel) == address(0)) revert ZeroAddress();
         accrueInterest();
         newModel.borrowRatePerSecond(cash, totalBorrows, totalReserves); // sanity: must not revert
@@ -583,6 +591,12 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     function setGuardian(address newGuardian) external onlyOwner {
         guardian = newGuardian;
         emit GuardianUpdated(newGuardian);
+    }
+
+    /// @notice Zero removes the controller (owner-only rate changes again).
+    function setRateController(address newRateController) external onlyOwner {
+        rateController = newRateController;
+        emit RateControllerUpdated(newRateController);
     }
 
     /// @notice Guardian or owner may PAUSE any risk-increasing action. Passing false leaves a flag as is.
