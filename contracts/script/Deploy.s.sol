@@ -8,8 +8,11 @@ import {CreditLendPool} from "../src/CreditLendPool.sol";
 import {CollateralManager} from "../src/CollateralManager.sol";
 import {KinkedInterestRateModel} from "../src/InterestRateModel.sol";
 import {FixedPriceOracle} from "../src/oracle/FixedPriceOracle.sol";
+import {CreditPriceOracle} from "../src/oracle/CreditPriceOracle.sol";
+import {IOrbioExchange} from "../src/interfaces/IOrbioExchange.sol";
 
-/// @notice Deploys the v1 CreditLend market on Robinhood Chain (4663) with AGENT.md §5 parameters.
+/// @notice Deploys the CreditLend market on Robinhood Chain (4663) with AGENT.md §5 parameters, the
+///         order-book $CREDIT price oracle (USDG fixed at $1) and order-book-sized borrow caps.
 ///
 /// Usage (simulation only, no broadcast):
 ///   ADMIN_MULTISIG=0x... GUARDIAN=0x... forge script script/Deploy.s.sol --fork-url robinhood
@@ -21,8 +24,18 @@ import {FixedPriceOracle} from "../src/oracle/FixedPriceOracle.sol";
 contract Deploy is Script {
     address constant CREDIT = 0xE33322DA1380e61E5Ae5DfB21e7f62924c73004C;
     address constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
+    address constant ORBIO_EXCHANGE = 0x6951fFd32630b05e06F50062AEA801625A58eBC0;
 
     uint256 constant TIMELOCK_DELAY = 2 days;
+
+    // $CREDIT price oracle (approved 2026-10-21). Needs update() every ~5 minutes; a new oracle
+    // starts at $1 and takes ~30 hours of readings to come down to the market price.
+    uint256 constant ORACLE_REFERENCE_SIZE = 5_000e6; // price of buying 5,000 CREDIT, fee included
+    uint256 constant ORACLE_MIN_INTERVAL = 5 minutes;
+    uint256 constant ORACLE_TWAP_WINDOW = 1 hours;
+    uint256 constant ORACLE_MAX_STALENESS = 2 hours;
+    uint256 constant ORACLE_MAX_DEVIATION_BPS = 2_500; // 25%
+    uint256 constant ORACLE_MAX_DROP_BPS_PER_HOUR = 200; // 2%
 
     // Interest model: low base, steep above the 65% kink (AGENT.md §5).
     uint256 constant BASE_RATE = 0.02e18;
@@ -59,13 +72,25 @@ contract Deploy is Script {
         admins[0] = admin;
         TimelockController timelock = new TimelockController(TIMELOCK_DELAY, admins, admins, address(0));
 
-        address[] memory assets = new address[](2);
-        assets[0] = CREDIT;
-        assets[1] = USDG;
-        uint256[] memory prices = new uint256[](2);
-        prices[0] = 1e18; // face value
-        prices[1] = 1e18;
-        FixedPriceOracle oracle = new FixedPriceOracle(assets, prices);
+        // USDG stays fixed at $1 (no trustworthy on-chain USDG/USD feed).
+        address[] memory assets = new address[](1);
+        assets[0] = USDG;
+        uint256[] memory prices = new uint256[](1);
+        prices[0] = 1e18;
+        FixedPriceOracle baseOracle = new FixedPriceOracle(assets, prices);
+
+        // $CREDIT is priced from the Orbio order book; every other asset passes through to baseOracle.
+        CreditPriceOracle oracle = new CreditPriceOracle(
+            IOrbioExchange(ORBIO_EXCHANGE),
+            baseOracle,
+            ORACLE_REFERENCE_SIZE,
+            ORACLE_MIN_INTERVAL,
+            ORACLE_TWAP_WINDOW,
+            ORACLE_MAX_STALENESS,
+            ORACLE_MAX_DEVIATION_BPS,
+            ORACLE_MAX_DROP_BPS_PER_HOUR
+        );
+        require(oracle.credit() == CREDIT, "exchange is not for this CREDIT");
 
         CollateralManager cm = new CollateralManager(msg.sender, CREDIT, oracle);
         cm.listAsset(USDG, true, USDG_LTV_BPS, USDG_LT_BPS, USDG_BONUS_BPS, USDG_SUPPLY_CAP);
@@ -91,8 +116,12 @@ contract Deploy is Script {
         require(pool.maxDebtPerAccount() == MAX_DEBT_PER_ACCOUNT && pool.maxTotalBorrows() == MAX_TOTAL_BORROWS);
         require(pool.pendingOwner() == address(timelock) && cm.pendingOwner() == address(timelock));
 
+        require(oracle.getPrice(CREDIT) == 1e18, "new oracle must start at $1");
+        require(oracle.getPrice(USDG) == 1e18);
+
         console.log("TimelockController", address(timelock));
-        console.log("FixedPriceOracle  ", address(oracle));
+        console.log("FixedPriceOracle  ", address(baseOracle), "(USDG = $1)");
+        console.log("CreditPriceOracle ", address(oracle), "(call update() every ~5 minutes)");
         console.log("CollateralManager ", address(cm));
         console.log("InterestRateModel ", address(irm));
         console.log("CreditLendPool    ", address(pool));
