@@ -1,13 +1,16 @@
 # CreditLend contracts
 
 A fully collateralized $CREDIT lending market on Robinhood Chain (4663).
-`../Agent.Md` is the spec. This folder implements **build priority 1**: the core pool, collateral, interest accrual and liquidation, all on-chain.
+`../Agent.Md` is the spec. This folder implements **build priority 1** (the core pool, collateral, interest accrual and liquidation, all on-chain) and **build priority 2** (the $CREDIT price oracle).
 
 ```
 forge build
-forge test              # unit + fuzz + invariant (16k randomized calls)
+forge test              # unit + fuzz + invariant (16k randomized calls); no internet needed
+FOUNDRY_PROFILE=fork forge test -vv   # on request: live-chain test against the real Orbio Exchange
 ADMIN_MULTISIG=0x.. GUARDIAN=0x.. forge script script/Deploy.s.sol --fork-url robinhood   # dry run
 ```
+
+`test/fork/OrbioExchangeFork.t.sol` reads the live Orbio Exchange and needs internet access, so the normal `forge test` skips it (configured in `foundry.toml`).
 
 ## Contracts
 
@@ -17,16 +20,48 @@ ADMIN_MULTISIG=0x.. GUARDIAN=0x.. forge script script/Deploy.s.sol --fork-url ro
 | `CollateralManager` | Per-asset LTV / liquidation threshold / bonus / supply cap; price routing | No |
 | `KinkedInterestRateModel` | Utilization curve; immutable params | No |
 | `LiquidationLogic` (library) | Health factor, close factor, seize math | No |
-| `FixedPriceOracle` | v1 prices (CREDIT = $1, USDG = $1), immutable | No |
+| `CreditPriceOracle` | $CREDIT settlement price from the Orbio order book, with circuit breakers; passes other assets to a base oracle | No |
+| `FixedPriceOracle` | Immutable fixed prices. v1 oracle; now the base oracle for USDG = $1 | No |
 
 Owner of the pool and CollateralManager = `TimelockController` (2-day delay). The guardian can only **pause** risk-increasing actions.
 
-## Design decisions (agreed 2026-10-20)
+## Design decisions (agreed 2026-10-20 / 2026-10-21)
 
 1. **Borrowed $CREDIT is consumed (decision A).** Once borrowed $CREDIT leaves the pool, it is fungible tokens in the borrower's wallet. Activation, selling and transferring can't be told apart on-chain, and each is final from the lender's view. So the pool doesn't try to detect activation. Lenders are protected only by overcollateralization plus permissionless liquidation. Liquidators repay with *market* $CREDIT, never "the same tokens". See `test_activation_lendersMadeWholeFromCollateral`.
-2. **Debt is valued at the $1 face value for every health check.** This is the conservative choice for a debt asset, and it needs no oracle on the debt side. Liquidation seizures are sized with a separate *settlement price* clamped to ≤ $1. Once a market oracle exists, a liquidator buying discounted $CREDIT gets no windfall from the borrower. **In v1 the fixed oracle sets the settlement price to $1, so the windfall still exists.** See limitations below.
+2. **Debt is valued at the $1 face value for every health check.** This is the conservative choice for a debt asset, and it needs no oracle on the debt side. Liquidation seizures are sized with a separate *settlement price* from `CreditPriceOracle`, capped at $1. A liquidator buying discounted $CREDIT therefore receives collateral worth what they actually paid plus the bonus, not a windfall from the borrower.
 3. **Interest accrues in $CREDIT** through a global borrow index. A 10% reserve factor builds a first-loss buffer. USDG or native-token rewards are a later, separate incentive layer.
-4. **v1 collateral is USDG only.** ORBIO and other volatile assets wait for the priority-2 oracle.
+4. **v1 collateral is USDG only.** ORBIO and other volatile assets need their own price feeds first.
+5. **$1 is the ceiling and the emergency fallback, not a floor.** A $1 floor would pay liquidators as if $CREDIT were worth $1 while it trades around $0.55.
+6. **No Uniswap price source (for now).** See the findings below.
+7. **An unpriceable asset counts as $0** (lender-safe) instead of freezing the account.
+
+## Can $CREDIT trade above $1? (verified 2026-10-21)
+
+Sources: the verified source of the live contracts on Sourcify (OrbioCreditV5 implementation `0xe4ae…0ba5`, OrbioExchange implementation `0x2d25…fbb7`), plus live reads at block 94,159,369.
+
+- **On Orbio's order book: no.** `PriceMath.isValid` rejects any sell order priced above 1 USDG per CREDIT.
+- **Buyers pay a fee on top:** `feeBps` = 2% live, with a hard maximum of 10%. A buyer's all-in cost can reach $1.02 today, or $1.10 at most. A seller never receives more than $1.
+- **Activation is worth less than $1:** `activationFeeBps` = 5% live, capped at 10%, so activating 1 CREDIT credits $0.95 of inference. This is the "5% fee" that secondary articles mention.
+- **The token itself has no transfer restrictions**, so off-book trades above $1 are possible in principle. They would be irrational while the book sells at ≤ $1.02.
+- **Market at the time:** cheapest ask $0.50. Buying 50,000 CREDIT averaged $0.537 plus the 2% fee. Every Uniswap pool priced it at $0.40–$0.76.
+- **Caveat:** both contracts are upgradeable by Orbio. This describes today's code.
+
+**Uniswap findings.** Uniswap v4 has 18 $CREDIT pools: none keeps price history, most are empty, and some charge fees of up to ~90%. Uniswap v3 has 1 pool (CREDIT/USDG 1%, `0x8C85…63c3`) holding about $10k, with price history switched off (observation cardinality 1). Uniswap v2 has none. That is too little liquidity for a manipulation-resistant price, and using it, even as a breaker trigger, would give attackers a cheap lever. Revisit if a deep pool with price history appears.
+
+## How the $CREDIT price works (`CreditPriceOracle`)
+
+The exchange keeps no price history, so the oracle takes its own readings. `update()` is permissionless and can be called once per 5 minutes. The agent will call it from priority 3.
+
+1. **Reading:** the oracle asks the book what buying **5,000 CREDIT** costs right now, *including Orbio's buyer fee*. That is the real all-in cost a liquidator pays, so for liquidations up to about that size, the liquidator keeps the full 5% bonus even if Orbio raises its fee. Larger liquidations pay more per CREDIT; see limitations. The result is capped at $1.
+2. **Circuit breakers:**
+   - *Too soon:* readings must be at least 5 minutes apart.
+   - *Incomplete:* if the book can't fill all 5,000, or the quote hits Orbio's 64-order limit, the reading is rejected.
+   - *Divergent:* if a reading is more than 25% away from the **previous reading**, it is rejected. A matching reading 5 minutes later is accepted. This throws away one-off spikes, such as fake asks placed and cancelled in one transaction, while real moves get confirmed. Comparing reading-to-reading (rather than to our own average) means it can never lock the oracle onto a stale price.
+   - *Speed limit:* the recorded price may fall at most **2% per hour**. Rises are not limited, up to $1. Faking a low price is free on this book; faking a high one costs real purchases.
+   - *Stale:* if nothing has been recorded for **2 hours**, the price is **$1**.
+3. **Price used by liquidations:** the time-weighted average of the last **hour** of recorded readings. This reads stored data only, never the live book, so nobody can move the book and liquidate in the same transaction.
+
+**Warm-up:** at deployment, and after any stale period, the history restarts from $1 and comes down under the speed limit. From $1 to ~$0.55 takes about 30 hours. Until then liquidators are paid more than market (lender-safe, costly for liquidated borrowers).
 
 ## Safety properties
 
@@ -38,20 +73,22 @@ Owner of the pool and CollateralManager = `TimelockController` (2-day delay). Th
 - Fee-on-transfer behavior is rejected (`_pullExact`), because CREDIT and USDG are both upgradeable proxies.
 - Pausing never blocks repay, liquidate, lender withdrawals or collateral withdrawals. Only the timelocked owner can unpause.
 - New borrows are rejected above 90% utilization, keeping a liquidity buffer for lenders.
+- **One unpriceable asset can't freeze an account.** An asset whose price can't be read counts as $0. Borrowing and withdrawing are judged on the collateral that *can* be priced, and liquidators can seize any priceable collateral. Repay always works.
 - Invariants fuzzed (`test/invariant`): cash and collateral fully backed, total borrows equal to the sum of account debts, no debt without collateral, and a share price that never drops unless bad debt is realized.
 
 ## Documented assumptions and known limitations
 
-- **$CREDIT** (`0xe333…004c`): 6 decimals, a UUPS proxy that exposes `activate(uint256)`, `mint` and `permit` (verified on-chain 2026-10-20). Orbio can upgrade it, and that trust assumption can't be removed. The pool never calls `activate`.
-- **USDG** (6 decimals) is also an upgradeable proxy.
-- The **v1 fixed oracle can't see a USDG depeg.** The mitigation is the guardian pausing borrows and collateral deposits, then a timelocked switch to the priority-2 oracle.
-- **Liquidation windfall in v1.** The settlement price is the fixed $1. If $CREDIT trades at $0.70, a liquidator pays $0.70 per CREDIT and receives $1.05 of the borrower's USDG. Lenders are unaffected, but borrowers who get liquidated lose more than the market cost of their debt. This ends when the priority-2 oracle supplies a market settlement price.
-- **The $1 ceiling is an assumption.** Buying credits directly reportedly carries a ~5% service fee, so the order book may trade slightly *above* $1. With the settlement price clamped at $1 and a 5% bonus, liquidator margin would then shrink toward zero. Priority 2 must either make the clamp configurable or keep the bonus above the observed maximum premium.
-- **One unpriceable asset blocks the whole account.** Health checks price every asset a borrower holds. If any of those prices reverts, that borrower can't borrow or withdraw, and can't be liquidated even through a different, healthy asset. Anyone can deposit collateral on a borrower's behalf, so a borrower could deliberately add a sliver of an asset whose breaker has tripped. This can't happen in v1 (one asset, immutable oracle). **Hard requirement for priority 2:** liquidation must not revert because of an unpriceable side asset (for example, value it at 0 for liquidation purposes). Repay always works.
+- **$CREDIT** (`0xe333…004c`): 6 decimals, a UUPS proxy (OrbioCreditV5). Orbio can upgrade it, and that trust assumption can't be removed. The pool never calls `activate`.
+- **USDG** (6 decimals) is also an upgradeable proxy. There is no trustworthy on-chain USDG/USD feed, so USDG stays fixed at $1, and **the oracle can't see a USDG depeg.** The mitigation is the guardian pausing borrows and collateral deposits.
+- **The oracle needs someone to call `update()`.** If nobody does for 2 hours, the price falls back to $1 and liquidated borrowers again lose more than the market cost of their debt (lenders are unaffected).
+- **Liquidation size vs. book depth (must be resolved before launch).** The settlement price reflects a 5,000-CREDIT purchase. Live quotes on 2026-10-21 cost $0.510 all-in per CREDIT for 5,000 (5.0% liquidator margin), $0.5345 for 25,000 (0.2%), and $0.548 for 50,000 (−2.2%). One purchase can't exceed ~55,000 CREDIT (64-order limit), and the whole book holds ~202,000 CREDIT. So liquidating more than ~25,000 CREDIT at once loses money for the liquidator. The deploy script's 1M USDG supply cap would allow ~700,000 CREDIT of debt, more than three times the entire book. Position sizes need to be matched to book depth, for example with per-account or total borrow caps (spec §8, "utilization caps").
+- **Residual manipulation risk.** Anyone can place cheap sell orders and cancel them in the same transaction. Someone who wins *every* reading slot with consistent fake readings can still drag the recorded price down, by at most 2% per hour. The liquidator's margin within the reference size is ~5%, so a sustained attack of about 2.5 hours could make even small liquidations unprofitable until honest readings resume. The agent's monitoring (priority 3/6) must alert on this. A stronger defense (requiring a reading to be confirmed in a later block by a *different* caller's reading) is a possible follow-up.
+- **When the price is $1 or near it,** Orbio's buyer fee can exceed the 5% liquidation bonus. If the fee were raised to its 10% maximum, liquidating near face value would be unprofitable.
+- **Seizing an unpriceable asset itself is impossible.** If a borrower's *only* collateral is unpriceable, liquidation waits until its price returns.
+- **`Deploy.s.sol` still deploys the v1 `FixedPriceOracle`.** Switching to `CreditPriceOracle` is a timelocked `CollateralManager.setOracle` step, and the deploy script is not updated yet.
 - After deployment, `CollateralManager` ownership is **pending** until the timelock executes `acceptOwnership()`.
 - Not audited yet.
 
 ## Next (spec §9)
 
-2. Price oracle: order book TWAP + Uniswap + circuit breakers, implementing `IPriceOracle`.
-3. Agent role: bounded, delayed rate-model updates through `setInterestRateModel`. No access to funds.
+3. Agent role: calls `CreditPriceOracle.update()` every 5 minutes, monitors positions and readings, and makes bounded, delayed rate-model updates through `setInterestRateModel`. No access to funds.

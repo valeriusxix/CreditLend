@@ -179,6 +179,27 @@ contract CollateralManager is ICollateralManager, Ownable2Step {
         liqValue = value.mulDiv(cfg.liqThresholdBps, BPS);
     }
 
+    /// @inheritdoc ICollateralManager
+    /// @dev An unlisted asset, a reverting oracle or a zero price all report `priced = false`.
+    function tryCollateralValue(address asset, uint256 amount)
+        external
+        view
+        returns (bool priced, uint256 value, uint256 borrowPower, uint256 liqValue)
+    {
+        AssetConfig memory cfg = _configs[asset];
+        if (!cfg.listed) return (false, 0, 0, 0);
+        if (amount == 0) return (true, 0, 0, 0);
+        try oracle.getPrice(asset) returns (uint256 price) {
+            if (price == 0) return (false, 0, 0, 0);
+            value = LiquidationLogic.toValue(amount, price, cfg.decimals, Math.Rounding.Floor);
+            borrowPower = value.mulDiv(cfg.ltvBps, BPS);
+            liqValue = value.mulDiv(cfg.liqThresholdBps, BPS);
+            priced = true;
+        } catch {
+            return (false, 0, 0, 0);
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Internal
     // ---------------------------------------------------------------------------------------------

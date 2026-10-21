@@ -645,13 +645,17 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
 
     /// @return borrowPower LTV-weighted collateral value (WAD USD).
     /// @return liqValue    Liquidation-threshold-weighted collateral value (WAD USD).
-    /// @dev Only queries prices for assets the borrower actually holds.
+    /// @dev Only queries prices for assets the borrower actually holds. An asset whose price can't
+    ///      be read counts as $0 instead of reverting, so one broken feed (or a sliver of such an
+    ///      asset deposited on someone's behalf) can never freeze an account: borrowing and
+    ///      withdrawing are judged on the collateral that CAN be priced, and liquidators can still
+    ///      seize any priceable collateral. Counting it as $0 is the lender-safe direction.
     function _collateralValues(address borrower) internal view returns (uint256 borrowPower, uint256 liqValue) {
         address[] memory assets = collateralManager.getListedAssets();
         for (uint256 i; i < assets.length; ++i) {
             uint256 balance = collateralOf[borrower][assets[i]];
             if (balance == 0) continue;
-            (, uint256 bp, uint256 lv) = collateralManager.collateralValue(assets[i], balance);
+            (, , uint256 bp, uint256 lv) = collateralManager.tryCollateralValue(assets[i], balance);
             borrowPower += bp;
             liqValue += lv;
         }

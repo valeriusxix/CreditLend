@@ -40,4 +40,12 @@ interface ICollateralManager {
         external
         view
         returns (uint256 value, uint256 borrowPower, uint256 liqValue);
+
+    /// @notice Same as `collateralValue`, but reports `priced = false` (and zero values) instead of
+    ///         reverting when the asset's price can't be read. Used by the pool so one unpriceable
+    ///         asset can never freeze an account.
+    function tryCollateralValue(address asset, uint256 amount)
+        external
+        view
+        returns (bool priced, uint256 value, uint256 borrowPower, uint256 liqValue);
 }

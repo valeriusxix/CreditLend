@@ -12,6 +12,13 @@ remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "forge-std/=lib/forge-std/src/",
 ]
+# Tests that read the live Robinhood Chain need the internet, so the normal `forge test`
+# skips them. Run them on request with:  FOUNDRY_PROFILE=fork forge test -vv
+no_match_path = "test/fork/*"
+
+[profile.fork]
+match_path = "test/fork/*"
+no_match_path = "none/*"
 
 [fuzz]
 runs = 1000
