@@ -208,6 +208,14 @@ The missing interest only appears later, in one jump, when borrowers repay. Some
 This is the designed trade-off (the README documents the speed limit), but it is a real exposure.
 
 - Code: `CreditPriceOracle` (`twapWindow`, `maxDropBpsPerHour`), `CollateralManager.getDebtSettlementPrice`.
+**Status (2026-10-22): not changed. Needs the owner's decision.**
+- **Why not:** the lag is the price of the oracle's manipulation protection (the 2%/hour fall limit). Removing it would let fake asks drag the price down.
+- **Option for the crash case:** pay liquidators at the LOWER of the recorded average and the live book. Faking the book lower in the same transaction would only reduce the liquidator's *own* pay, so it can't be abused, and in a real crash borrowers stop over-paying.
+- **Costs of that option:**
+  - a live order-book read in every liquidation, up to 64 orders, so more gas;
+  - it does nothing for the rally case, where liquidations still stall until the average catches up;
+  - it changes liquidation pricing, which the agent and the app would need to mirror.
+
 **Test:** `test_L3_liquidationPayLagsACrash`
 1. Converge at $0.55, then take an honest $0.30 reading every 5 minutes for 6 hours.
 2. The settlement price is still **$0.493**, so a liquidator buying at $0.30 is paid 1.64 times what the market justifies, from the borrower's collateral.
@@ -222,6 +230,14 @@ This is the designed trade-off (the README documents the speed limit), but it is
 | §4.1 InterestRateModel "updated by the agent" | The agent can only *propose* one of three timelock-approved models, with 6 hours' notice | Safer than the spec; flagged only for completeness |
 
 **Test:** none needed; these are visible by reading `Deploy.s.sol` and `CreditLendPool`.
+
+**Status (2026-10-22): skipped in code. These are spec questions, not bugs.**
+- **Interest currency:** paying lenders in USDG would mean a different market design.
+- **ORBIO collateral:** needs a trustworthy ORBIO price. Chainlink's Robinhood list has none, and the order book prices only $CREDIT.
+- **Safety margin:** the code is already stricter than a 10–20% margin for health checks, because it values debt at $1.
+- **Agent's rate power:** narrower than the spec's, which is safer.
+
+Recommended: update AGENT.md §1, §4.1, §5 to match the code (owner's decision).
 
 ---
 
