@@ -70,6 +70,27 @@ contract CreditLendPoolTest is BaseTest {
         assertApproxEqAbs(pool.previewRedeem(shares), 1_000 * ONE_CREDIT, 1);
     }
 
+    /// AUDIT.md L-1: accrued every second (anyone may call accrueInterest), each second's interest on a
+    /// small market was less than one atom and rounded to zero, so lenders' share price never moved while
+    /// the borrower's debt kept growing. The pool's total must keep pace with the real debt.
+    function test_lender_frequentAccrual_doesNotLoseInterest() public {
+        _lend(lender, 100 * ONE_CREDIT);
+        _postCollateral(borrower, usdg, 100 * ONE_USDG);
+        _borrow(borrower, 50 * ONE_CREDIT);
+        uint256 assetsBefore = pool.totalAssets();
+
+        for (uint256 i; i < 3_600; ++i) {
+            vm.warp(block.timestamp + 1);
+            pool.accrueInterest();
+        }
+
+        uint256 debtGrowth = pool.debtOf(borrower) - 50 * ONE_CREDIT;
+        assertGt(debtGrowth, 0);
+        assertApproxEqAbs(pool.totalBorrows(), 50 * ONE_CREDIT + debtGrowth, 2, "total keeps pace with the real debt");
+        assertLe(pool.totalBorrows(), pool.debtOf(borrower), "never above the real debt");
+        assertGt(pool.totalAssets(), assetsBefore, "lenders' share price rose");
+    }
+
     // ============================================================ borrow limits
 
     function test_borrow_upToLtv() public {

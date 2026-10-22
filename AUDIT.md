@@ -174,6 +174,11 @@ The missing interest only appears later, in one jump, when borrowers repay. Some
 - Code: `CreditLendPool._pendingAccrual` (`interest = totalBorrows.mulDiv(factor, WAD)`, floor).
 - Severity Low: it bites only in small markets or under constant spamming (about 50,000 gas per call, roughly $9/hour at today's gas). The money is delayed and redistributed, not destroyed.
 
+**Status (2026-10-22): fixed** (branch `fix/l1-interest-rounding`).
+- **The fix:** interest smaller than one atom is now carried to the next accrual (`interestRemainder`) instead of being dropped.
+- **Cost:** about 5,800 gas more per pool action.
+- **The proof:** new test `test_lender_frequentAccrual_doesNotLoseInterest` failed before (the total was stuck at 50.000000 while the debt grew 554 atoms) and passes after (the total tracks the debt within 1 atom and never exceeds it). The invariant tests still pass.
+
 **Test:** `test_L1_frequentAccrual_suppressesLenderInterest`
 1. 50 CREDIT borrowed from 100 lent; `accrueInterest()` called every second for an hour.
 2. `totalBorrows` and `totalAssets` are unchanged, while `debtOf(borrower)` has grown.

@@ -130,6 +130,8 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     /// @notice Cumulative borrow interest index, WAD-scaled, starting at 1e18.
     uint256 public borrowIndex;
     uint256 public lastAccrualTimestamp;
+    /// @notice Interest smaller than one $CREDIT atom, carried to the next accrual (WAD-scaled atoms).
+    uint256 public interestRemainder;
 
     struct BorrowSnapshot {
         uint256 principal; // debt at the time of the last update
@@ -238,29 +240,45 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
     /// @notice Brings the market up to date. Called automatically by every state-changing action.
     function accrueInterest() public {
         if (block.timestamp == lastAccrualTimestamp) return;
-        (uint256 newBorrows, uint256 newReserves, uint256 newIndex, uint256 interest) = _pendingAccrual();
+        (uint256 newBorrows, uint256 newReserves, uint256 newIndex, uint256 interest, uint256 remainder) =
+            _accrual();
         totalBorrows = newBorrows;
         totalReserves = newReserves;
         borrowIndex = newIndex;
+        interestRemainder = remainder;
         lastAccrualTimestamp = block.timestamp;
         if (interest > 0) emit InterestAccrued(interest, newIndex, newBorrows, newReserves);
     }
 
-    /// @dev Simple (linear) interest over the elapsed interval, compounded at each accrual. Shared by
-    ///      `accrueInterest` and the view functions so previews exactly match execution.
+    /// @dev The accrual `accrueInterest` would apply now, for the view functions (previews match execution).
     function _pendingAccrual()
         internal
         view
         returns (uint256 newBorrows, uint256 newReserves, uint256 newIndex, uint256 interest)
     {
+        (newBorrows, newReserves, newIndex, interest,) = _accrual();
+    }
+
+    /// @dev Simple (linear) interest over the elapsed interval, compounded at each accrual. The fraction of
+    ///      an atom that whole-atom interest can't hold is carried to the next accrual (`interestRemainder`)
+    ///      instead of being dropped, so frequent accruals can't make interest vanish (AUDIT.md L-1).
+    function _accrual()
+        internal
+        view
+        returns (uint256 newBorrows, uint256 newReserves, uint256 newIndex, uint256 interest, uint256 remainder)
+    {
         uint256 elapsed = block.timestamp - lastAccrualTimestamp;
-        if (elapsed == 0 || totalBorrows == 0) return (totalBorrows, totalReserves, borrowIndex, 0);
+        if (elapsed == 0 || totalBorrows == 0) {
+            return (totalBorrows, totalReserves, borrowIndex, 0, interestRemainder);
+        }
 
         uint256 rate = interestRateModel.borrowRatePerSecond(cash, totalBorrows, totalReserves);
         if (rate > MAX_BORROW_RATE_PER_SECOND) rate = MAX_BORROW_RATE_PER_SECOND;
 
         uint256 factor = rate * elapsed; // WAD
-        interest = totalBorrows.mulDiv(factor, WAD);
+        uint256 interestWad = totalBorrows * factor + interestRemainder; // atoms, scaled by WAD
+        interest = interestWad / WAD;
+        remainder = interestWad % WAD;
         newBorrows = totalBorrows + interest;
         newReserves = totalReserves + interest.mulDiv(reserveFactorBps, BPS);
         newIndex = borrowIndex + borrowIndex.mulDiv(factor, WAD);
