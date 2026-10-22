@@ -8,14 +8,14 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {CreditLendPool} from "../src/CreditLendPool.sol";
 import {CollateralManager} from "../src/CollateralManager.sol";
 import {KinkedInterestRateModel} from "../src/InterestRateModel.sol";
-import {FixedPriceOracle} from "../src/oracle/FixedPriceOracle.sol";
+import {ChainlinkStablecoinOracle, IChainlinkAggregator} from "../src/oracle/ChainlinkStablecoinOracle.sol";
 import {CreditPriceOracle} from "../src/oracle/CreditPriceOracle.sol";
 import {IOrbioExchange} from "../src/interfaces/IOrbioExchange.sol";
 import {IInterestRateModel} from "../src/interfaces/IInterestRateModel.sol";
 import {RateController, IRateControlledPool} from "../src/RateController.sol";
 
 /// @notice Deploys the CreditLend market on Robinhood Chain (4663) with AGENT.md §5 parameters, the
-///         order-book $CREDIT price oracle (USDG fixed at $1), order-book-sized borrow caps and the
+///         order-book $CREDIT price oracle (USDG from Chainlink, capped at $1), order-book-sized borrow caps and the
 ///         agent's RateController (a timelock-approved menu of three rate models).
 ///
 /// Usage (simulation only, no broadcast):
@@ -29,6 +29,9 @@ contract Deploy is Script {
     address constant CREDIT = 0xE33322DA1380e61E5Ae5DfB21e7f62924c73004C;
     address constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
     address constant ORBIO_EXCHANGE = 0x6951fFd32630b05e06F50062AEA801625A58eBC0;
+    // Chainlink "USDG / USD" on Robinhood Chain: 8 decimals, 0.5% deviation, 24h heartbeat (checked 2026-10-22).
+    address constant USDG_USD_FEED = 0x61B7e5650328764B076A108EFF5fa7282a1B9aD2;
+    uint256 constant USDG_FEED_MAX_AGE = 25 hours; // heartbeat + 1 hour
 
     uint256 constant TIMELOCK_DELAY = 2 days;
 
@@ -112,12 +115,9 @@ contract Deploy is Script {
         (roles[0], roles[1]) = (admin, deployer);
         TimelockController timelock = new TimelockController(0, roles, roles, address(0));
 
-        // USDG stays fixed at $1 (no trustworthy on-chain USDG/USD feed).
-        address[] memory assets = new address[](1);
-        assets[0] = USDG;
-        uint256[] memory prices = new uint256[](1);
-        prices[0] = 1e18;
-        FixedPriceOracle baseOracle = new FixedPriceOracle(assets, prices);
+        // USDG from Chainlink's USDG/USD feed, capped at $1, $1 if the feed is stale (AUDIT.md M-3).
+        ChainlinkStablecoinOracle baseOracle =
+            new ChainlinkStablecoinOracle(USDG, IChainlinkAggregator(USDG_USD_FEED), USDG_FEED_MAX_AGE);
 
         // $CREDIT is priced from the Orbio order book; every other asset passes through to baseOracle.
         CreditPriceOracle oracle = new CreditPriceOracle(
@@ -179,10 +179,10 @@ contract Deploy is Script {
         require(rateController.menu().length == 3 && rateController.isApproved(irm) && rateController.agent() == agent);
 
         require(oracle.getPrice(CREDIT) == 1e18, "new oracle must start at $1");
-        require(oracle.getPrice(USDG) == 1e18);
+        require(oracle.getPrice(USDG) >= 0.98e18, "USDG must be at its peg when deploying");
 
         console.log("TimelockController", address(timelock));
-        console.log("FixedPriceOracle  ", address(baseOracle), "(USDG = $1)");
+        console.log("USDG oracle       ", address(baseOracle), "(Chainlink USDG/USD, capped at $1)");
         console.log("CreditPriceOracle ", address(oracle), "(run the agent: ../agent)");
         console.log("CollateralManager ", address(cm));
         console.log("InterestRateModel ", address(irm));

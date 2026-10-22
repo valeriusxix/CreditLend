@@ -21,7 +21,8 @@ ADMIN_MULTISIG=0x.. GUARDIAN=0x.. AGENT=0x.. forge script script/Deploy.s.sol --
 | `KinkedInterestRateModel` | Utilization curve; immutable params | No |
 | `LiquidationLogic` (library) | Health factor, close factor, seize math | No |
 | `CreditPriceOracle` | $CREDIT settlement price from the Orbio order book, with circuit breakers; passes other assets to a base oracle | No |
-| `FixedPriceOracle` | Immutable fixed prices. v1 oracle; now the base oracle for USDG = $1 | No |
+| `FixedPriceOracle` | Immutable fixed prices. The v1 oracle; now used only in tests | No |
+| `ChainlinkStablecoinOracle` | USDG from Chainlink's USDG/USD feed, capped at $1; $1 if the feed is stale or broken. Base oracle for USDG (AUDIT.md M-3) | No |
 | `RateController` | The agent's only on-chain power: switching between timelock-approved rate models, with a public delay | No |
 
 Owner of the pool, CollateralManager and RateController = `TimelockController` (2-day delay). The guardian can only **pause** risk-increasing actions and **cancel** a pending rate switch. The agent can only **propose** a rate switch from the menu.
@@ -98,7 +99,7 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
 ## Documented assumptions and known limitations
 
 - **$CREDIT** (`0xe333…004c`): 6 decimals, a UUPS proxy (OrbioCreditV5). Orbio can upgrade it, and that trust assumption can't be removed. The pool never calls `activate`.
-- **USDG** (6 decimals) is also an upgradeable proxy. There is no trustworthy on-chain USDG/USD feed, so USDG stays fixed at $1, and **the oracle can't see a USDG depeg.** The mitigation is the guardian pausing borrows and collateral deposits.
+- **USDG** (6 decimals) is also an upgradeable proxy. It is priced from **Chainlink's USDG/USD feed** on Robinhood Chain (`0x61B7…9aD2`, updates on every 0.5% move and at least daily), capped at $1. A depeg therefore shrinks borrow limits and makes positions liquidatable. If the feed is more than 25 hours old or broken, USDG falls back to $1 (the old fixed price), so an outage never blocks liquidations. A depeg *during* a Chainlink outage is not seen; the guardian can still pause borrowing. Robinhood Chain has no Chainlink sequencer-uptime feed to check.
 - **The oracle needs someone to call `update()`.** The agent does; anyone else may too. If nobody does for 2 hours, the price falls back to $1 *while the outage lasts*, and borrowers liquidated during it lose more than the market cost of their debt (lenders are unaffected). Once readings resume, the price returns to the last good price straight away.
 - **Liquidation size vs. book depth (addressed with borrow caps; revisit regularly).** The settlement price reflects a 5,000-CREDIT purchase, and bigger purchases walk up the book. Liquidator margin by liquidation size, live book at block 94,212,109 (2026-10-21):
 
@@ -115,7 +116,7 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
 - **Residual manipulation risk.** Anyone can place cheap sell orders and cancel them in the same transaction. Someone who wins *every* reading slot with consistent fake readings can still drag the recorded price down, by at most 2% per hour. The liquidator's margin within the reference size is ~5%, so a sustained attack of about 2.5 hours could make even small liquidations unprofitable until honest readings resume. The agent alerts on this and switches to a reading every 5 minutes the moment anyone else posts a reading, so it contests every slot instead of leaving most of them empty. A stronger defense (requiring a reading to be confirmed in a later block by a *different* caller's reading) is a possible follow-up.
 - **When the price is $1 or near it,** Orbio's buyer fee can exceed the 5% liquidation bonus. If the fee were raised to its 10% maximum, liquidating near face value would be unprofitable.
 - **Seizing an unpriceable asset itself is impossible.** If a borrower's *only* collateral is unpriceable, liquidation waits until its price returns.
-- **`Deploy.s.sol` deploys `CreditPriceOracle`** (with a `FixedPriceOracle` holding only USDG = $1 as its base). After deployment someone must keep calling `update()`: the agent (`../agent`) does, hourly or every 5 minutes. Until then, and for the ~30-hour warm-up, the $CREDIT settlement price sits at or near $1.
+- **`Deploy.s.sol` deploys `CreditPriceOracle`** (with `ChainlinkStablecoinOracle` pricing USDG as its base). After deployment someone must keep calling `update()`: the agent (`../agent`) does, hourly or every 5 minutes. Until then, and for the ~30-hour warm-up, the $CREDIT settlement price sits at or near $1.
 - **When `Deploy.s.sol` finishes, the 2-day timelock already owns** `CollateralManager` and `CreditLendPool`, and the deployer's wallet holds no role (AUDIT.md H-1). The timelock is created with no delay so the same deployment can make it accept ownership; it then sets its own 2-day delay and the deployer renounces its temporary roles. `ADMIN_MULTISIG` must not be the deployer's address. Proven by `test/fork/DeployOwnership.t.sol` (`FOUNDRY_PROFILE=fork forge test`).
 - Not audited yet.
 

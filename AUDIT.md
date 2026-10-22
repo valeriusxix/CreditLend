@@ -137,6 +137,16 @@ There is no admin function to write off debt, so it stays hidden until someone l
 
 - Code: `FixedPriceOracle` (immutable), `Deploy.s.sol` (USDG fixed at 1e18), `CreditPriceOracle` (single source).
 
+**Status (2026-10-22): the USDG half is fixed** (branch `fix/m3-usdg-price`).
+- **The fix:** USDG is now priced by the new `ChainlinkStablecoinOracle` from Chainlink's "USDG / USD" feed on Robinhood Chain (`0x61B7e5650328764B076A108EFF5fa7282a1B9aD2`, 8 decimals, 0.5% deviation, 24h heartbeat; read live at $1.000196).
+- **Behaviour:** capped at $1, and $1 if the feed is more than 25 hours old, zero, future-dated or reverting. An outage is never worse than before, and can't block liquidations.
+- **The proof:** fork test `test_fork_usdgDepeg_reachesTheMarket` deploys with the real script and makes the feed report $0.40. It failed before (the market still said $1) and passes after. Unit tests cover the edge cases, and show a 20% depeg making an over-borrowed position liquidatable.
+- **The audit's own test** still passes, because it exercises `FixedPriceOracle`, which the deployment no longer uses.
+- **Still open:**
+  - a depeg during a Chainlink outage isn't seen;
+  - Robinhood Chain has no sequencer-uptime feed;
+  - the $CREDIT price is still order-book only. AGENT.md's "+ Uniswap" second source would need a $CREDIT pool with real liquidity, which hasn't been confirmed.
+
 **Test:** `test_M3_fixedUsdgPrice_cannotSeeADepeg`
 - With the deployed `FixedPriceOracle`, an attacker borrows 699 CREDIT against 1,000 USDG.
 - The test asserts the oracle still reports $1 and the health factor stays above 1, whatever USDG trades at.
