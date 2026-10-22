@@ -146,6 +146,43 @@ contract CreditLendPoolTest is BaseTest {
 
     // ============================================================ repay & collateral
 
+    /// AUDIT.md L-2: the minimum loan size only applied to borrowing, so a repayment could leave a debt of
+    /// one atom, which no liquidator will ever touch. A repayment may no longer CREATE such dust.
+    function test_repay_cannotLeaveDustBelowMinDebt() public {
+        _lend(lender, 1_000 * ONE_CREDIT);
+        _postCollateral(borrower, usdg, 100 * ONE_USDG);
+        _borrow(borrower, 50 * ONE_CREDIT);
+        vm.startPrank(borrower);
+        credit.approve(address(pool), type(uint256).max);
+        vm.expectRevert(CreditLendPool.DebtBelowMinimum.selector);
+        pool.repay(50 * ONE_CREDIT - 1, borrower); // would leave 1 atom
+        vm.expectRevert(CreditLendPool.DebtBelowMinimum.selector);
+        pool.repay(45 * ONE_CREDIT, borrower); // would leave 5 CREDIT
+        vm.stopPrank();
+    }
+
+    /// What must keep working: repaying everything, repaying down to exactly the minimum, and paying down
+    /// a debt that is already below the minimum (e.g. after the timelock raised it).
+    function test_repay_fullOrDownToMinimum_orAlreadySmall_stillWorks() public {
+        _lend(lender, 1_000 * ONE_CREDIT);
+        _postCollateral(borrower, usdg, 100 * ONE_USDG);
+        _borrow(borrower, 50 * ONE_CREDIT);
+        vm.startPrank(borrower);
+        credit.approve(address(pool), type(uint256).max);
+        pool.repay(40 * ONE_CREDIT, borrower);
+        assertEq(pool.debtOf(borrower), 10 * ONE_CREDIT, "down to exactly the minimum");
+        vm.stopPrank();
+
+        vm.prank(owner);
+        pool.setMinDebt(20 * ONE_CREDIT); // the existing 10 CREDIT debt is now below the minimum
+        vm.startPrank(borrower);
+        pool.repay(3 * ONE_CREDIT, borrower);
+        assertEq(pool.debtOf(borrower), 7 * ONE_CREDIT, "an already-small debt can still be paid down");
+        pool.repay(type(uint256).max, borrower);
+        assertEq(pool.debtOf(borrower), 0, "and repaid in full");
+        vm.stopPrank();
+    }
+
     function test_repayFull_thenWithdrawAllCollateral() public {
         _lend(lender, 1_000 * ONE_CREDIT);
         _postCollateral(borrower, usdg, 1_000 * ONE_USDG);

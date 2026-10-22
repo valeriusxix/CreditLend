@@ -189,6 +189,12 @@ The missing interest only appears later, in one jump, when borrowers repay. Some
 
 - Code: `CreditLendPool.repay` / `_reduceDebt` (no minimum check).
 
+**Status (2026-10-22): fixed** (branch `fix/l2-repay-dust`).
+- **The fix:** `repay` now reverts with `DebtBelowMinimum` if it would turn a debt of at least `minDebt` into a leftover between 0 and `minDebt`.
+- **Still allowed:** repaying in full, repaying down to exactly `minDebt`, and paying down a debt that was already below the minimum.
+- **The app:** the Repay form checks the same rule before asking the wallet.
+- **The proof:** new test `test_repay_cannotLeaveDustBelowMinDebt` failed before and passes after. Guard test `test_repay_fullOrDownToMinimum_orAlreadySmall_stillWorks` passes before and after.
+
 **Test:** `test_L2_repayLeavesDustBelowMinDebt`
 1. The borrower borrows 10 CREDIT and repays 10 CREDIT minus 1 atom.
 2. The remaining debt is 1 atom, below `minDebt`.

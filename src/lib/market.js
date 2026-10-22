@@ -71,6 +71,12 @@ export function collateralWithdrawMax(market, account, asset) {
 /// Repaying "all" pulls the debt as of the transaction, a little more than read: approve a 0.01% buffer.
 export const repayAllAllowance = (debt) => debt + debt / 10_000n + 1n
 
+/// The pool refuses a repayment that turns a normal-sized debt into a leftover below minDebt (AUDIT.md L-2).
+export function repayLeavesDust(debt, amount, minDebt) {
+  const left = amount >= debt ? 0n : debt - amount
+  return left > 0n && left < minDebt && debt >= minDebt
+}
+
 /// What a liquidation would repay and seize. `repayAmount` is what the liquidator offers.
 export function liquidationPreview({ market, debt, hf, asset, available, repayAmount }) {
   const cap = maxRepayable(debt, hf, market.minDebt)

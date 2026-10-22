@@ -5,7 +5,7 @@ import Button from './Button.jsx'
 import TxNotice from './TxNotice.jsx'
 import { useTx } from '../hooks/useTx.js'
 import { parseAmount, fmtAmount, fmtHealth, healthBand, toInputString, MAX_UINT } from '../lib/format.js'
-import { borrowLimits, collateralWithdrawMax, healthAfter, repayAllAllowance } from '../lib/market.js'
+import { borrowLimits, collateralWithdrawMax, healthAfter, repayAllAllowance, repayLeavesDust } from '../lib/market.js'
 
 const TABS = [
   { id: 'lend', label: 'Lend' },
@@ -280,6 +280,9 @@ function RepayForm({ market, account, wallet, refresh }) {
   let reason = amount.error ?? (amount.value == null ? true : null)
   if (account && debt === 0n) reason = 'You have no debt to repay.'
   else if (!reason && amount.value > wallet$) reason = `Your wallet holds only ${fmtAmount(wallet$, c.decimals)} ${c.symbol}.`
+  else if (!reason && !payAll && repayLeavesDust(debt, amount.value, market.minDebt)) {
+    reason = `That would leave less than the ${fmtAmount(market.minDebt, c.decimals)} ${c.symbol} minimum loan. Repay everything (Max), or leave at least ${fmtAmount(market.minDebt, c.decimals)}.`
+  }
 
   const submit = () => tx.run({
     approve: { token: c.address, spender: market.pool, amount: payAll ? repayAllAllowance(debt) : amount.value, label: c.symbol },

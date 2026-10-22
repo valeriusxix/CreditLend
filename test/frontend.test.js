@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { BaseError, ContractFunctionRevertedError, UserRejectedRequestError, encodeErrorResult } from 'viem'
 import { parseAmount, fmtAmount, fmtPct, fmtHealth, healthBand, WAD, MAX_UINT } from '../src/lib/format.js'
-import { borrowLimits, collateralWithdrawMax, healthAfter, collateralValues, debtValue, liquidationPreview, repayAllAllowance } from '../src/lib/market.js'
+import { borrowLimits, collateralWithdrawMax, healthAfter, collateralValues, debtValue, liquidationPreview, repayAllAllowance, repayLeavesDust } from '../src/lib/market.js'
 import { friendlyError, revertName, REVERT_MESSAGES } from '../src/lib/errors.js'
 import { parseRoute } from '../src/hooks/useHashRoute.js'
 import poolAbi from '../src/abi/CreditLendPool.json' with { type: 'json' }
@@ -137,4 +137,12 @@ test('routes: landing, app sections, account lookup and docs', () => {
   assert.deepEqual(parseRoute('#app/borrow'), { page: 'app', section: 'borrow', extra: '' })
   assert.deepEqual(parseRoute('#app/account/0xabc'), { page: 'app', section: 'account', extra: '0xabc' })
   assert.deepEqual(parseRoute('#docs/agent'), { page: 'docs', section: 'agent' })
+})
+
+test('repay: the form refuses what the pool refuses (leaving dust below the minimum loan)', () => {
+  assert.equal(repayLeavesDust(50n * C, 50n * C - 1n, 10n * C), true, '1 atom left')
+  assert.equal(repayLeavesDust(50n * C, 45n * C, 10n * C), true, '5 CREDIT left')
+  assert.equal(repayLeavesDust(50n * C, 40n * C, 10n * C), false, 'exactly the minimum left')
+  assert.equal(repayLeavesDust(50n * C, 60n * C, 10n * C), false, 'everything repaid')
+  assert.equal(repayLeavesDust(7n * C, 3n * C, 10n * C), false, 'already below the minimum: may pay down')
 })

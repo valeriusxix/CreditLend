@@ -455,6 +455,11 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
         uint256 debt = _debtOf(onBehalfOf, borrowIndex);
         if (debt == 0) revert NoDebt();
         repaid = amount > debt ? debt : amount;
+        // A repayment may not turn a normal-sized debt into dust below minDebt that no liquidator would
+        // touch (AUDIT.md L-2). Repaying in full, or down to at least minDebt, is always fine, and a debt
+        // already below minDebt can still be paid down.
+        uint256 left = debt - repaid;
+        if (left != 0 && left < minDebt && debt >= minDebt) revert DebtBelowMinimum();
 
         _reduceDebt(onBehalfOf, debt, repaid);
         cash += repaid;
