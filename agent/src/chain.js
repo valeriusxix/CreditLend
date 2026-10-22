@@ -21,6 +21,12 @@ export function revertName(err) {
   return inner?.data?.errorName ?? null
 }
 
+/// Gas limit for a transaction estimated at `estimate`. Pool actions first accrue interest, which writes
+/// storage only if time has passed since the last accrual; estimated at the latest block, a transaction
+/// landing a second later can need ~20-40k more gas and run out (seen on a fork test of the frontend).
+/// Only gas actually used is paid, so the padding costs nothing.
+export const paddedGas = (estimate) => estimate + (estimate * 3n) / 10n + 50_000n
+
 // eth_getLogs on this RPC accepts at most ~10M blocks per call with an address filter.
 const LOG_CHUNK = 5_000_000n
 
@@ -42,7 +48,8 @@ export class ChainAdapter {
   async _write(address, abi, functionName, args = []) {
     if (!this.wallet) throw new Error('no AGENT_PRIVATE_KEY: read-only mode')
     const { request } = await this.client.simulateContract({ address, abi, functionName, args, account: this.account })
-    const hash = await this.wallet.writeContract(request)
+    const estimate = await this.client.estimateContractGas(request)
+    const hash = await this.wallet.writeContract({ ...request, gas: paddedGas(estimate) })
     const receipt = await this.client.waitForTransactionReceipt({ hash })
     if (receipt.status !== 'success') throw new Error(`${functionName} reverted in ${hash}`)
     return { hash, receipt }

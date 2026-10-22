@@ -6,7 +6,7 @@ The off-chain half of build priority 3 (spec §4.2, §6 "Agent Operational Loop"
 cd agent
 npm install
 cp .env.example .env      # then fill it in
-npm test                  # 69 tests, no network
+npm test                  # 70 tests, no network
 npm run once              # one check, then exit
 npm start                 # run forever (one check a minute)
 ```
