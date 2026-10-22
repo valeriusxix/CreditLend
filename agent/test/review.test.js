@@ -77,3 +77,10 @@ test('snapshot is plain text the model can read', () => {
   assert.match(s, /Current rate setting: normal/)
   assert.match(s, /5,000 CREDIT 5\.0%/)
 })
+
+test('decide: a recent (even cancelled) proposal blocks a new one until the contract allows it', () => {
+  const recent = { ...rateState, nextProposalAllowed: base.now + 3600 }
+  assert.match(decideProposal({ ...base, rateState: recent, recommendation: rec('higher') }).why, /last proposal/)
+  const over = { ...rateState, nextProposalAllowed: base.now }
+  assert.equal(decideProposal({ ...base, rateState: over, recommendation: rec('higher') }).action, 'propose')
+})

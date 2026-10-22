@@ -80,6 +80,8 @@ export function decideProposal({ recommendation, labels, currentLabel, rateState
   const p = rateState.pending
   if (p.model !== '0x0000000000000000000000000000000000000000' && now <= p.executableAt + rateState.gracePeriod) return none('a switch is already pending')
   if (rateState.lastExecutedAt !== 0 && now < rateState.lastExecutedAt + rateState.cooldown) return none('cooldown after the last switch is still running')
+  // The contract also counts the cooldown from the last proposal, even a cancelled one.
+  if (rateState.nextProposalAllowed != null && now < rateState.nextProposalAllowed) return none('cooldown after the last proposal is still running')
   if (!agentAddress || rateState.agent.toLowerCase() !== agentAddress.toLowerCase()) return none('this wallet is not the RateController agent')
   if (!enabled) return none(`would propose "${target}", but RATE_PROPOSALS_ENABLED is off`)
   return { action: 'propose', model: labels[target].address, target }

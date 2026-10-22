@@ -77,7 +77,7 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
    | Higher (attract lenders) | 4% | +15% | 60% | +200% | 219% |
 
 2. **Announced 6 hours ahead.** The agent proposes; anyone can execute once 6 hours have passed (within the following 24 hours, after which the proposal expires). Users see every rate change coming.
-3. **At most one switch per 24 hours**, counted from the last executed switch. One proposal can be pending at a time.
+3. **At most one proposal per 24 hours**, counted from the agent's last proposal (even a cancelled one) and from the last executed switch. One proposal can be pending at a time. So even a stolen agent key can make the guardian cancel at most once a day, until the timelock replaces the agent.
 4. **The guardian or timelock can cancel** a pending switch. If the timelock removes a model from the menu, a pending switch to it can no longer execute.
 5. **No other power.** The agent can't touch funds, collateral rules, caps, prices or the menu. The timelock can still set any model directly, set a new agent, or unset the controller.
 

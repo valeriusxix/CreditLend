@@ -49,6 +49,7 @@ export const rateControllerAbi = parseAbi([
   'function agent() view returns (address)',
   'function pending() view returns (address model, uint64 executableAt)',
   'function lastExecutedAt() view returns (uint256)',
+  'function nextProposalAllowed() view returns (uint256)',
   'function cooldown() view returns (uint256)',
   'function gracePeriod() view returns (uint256)',
   'function propose(address model)',

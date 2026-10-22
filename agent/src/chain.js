@@ -203,13 +203,14 @@ export class ChainAdapter {
 
   async rateState() {
     const rc = this.cfg.rateController
-    const [menu, agent, pending, lastExecutedAt, cooldown, gracePeriod] = await Promise.all([
+    const [menu, agent, pending, lastExecutedAt, cooldown, gracePeriod, nextProposalAllowed] = await Promise.all([
       this._read(rc, rateControllerAbi, 'menu'),
       this._read(rc, rateControllerAbi, 'agent'),
       this._read(rc, rateControllerAbi, 'pending'),
       this._read(rc, rateControllerAbi, 'lastExecutedAt'),
       this._read(rc, rateControllerAbi, 'cooldown'),
       this._read(rc, rateControllerAbi, 'gracePeriod'),
+      this._read(rc, rateControllerAbi, 'nextProposalAllowed'),
     ])
     const models = await Promise.all(menu.map(async (address) => {
       const [base, slope1, slope2, kink] = await Promise.all(['baseRatePerYear', 'slope1PerYear', 'slope2PerYear', 'kink'].map((n) => this._read(address, rateModelAbi, n)))
@@ -222,6 +223,7 @@ export class ChainAdapter {
       lastExecutedAt: Number(lastExecutedAt),
       cooldown: Number(cooldown),
       gracePeriod: Number(gracePeriod),
+      nextProposalAllowed: Number(nextProposalAllowed),
     }
   }
 

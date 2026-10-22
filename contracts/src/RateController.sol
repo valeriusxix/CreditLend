@@ -19,7 +19,9 @@ interface IRateControlledPool {
 ///            rate change coming.
 ///         3. After the delay, anyone may execute it (within `gracePeriod`, otherwise it expires).
 ///         4. The guardian or the owner may cancel a pending proposal at any time.
-///         5. The agent may propose again only `cooldown` after the last EXECUTED switch.
+///         5. The agent may propose again only `cooldown` after its last PROPOSAL (cancelled or not) and
+///            after the last executed switch. So a stolen agent key can make at most one proposal per
+///            cooldown, and the guardian never has to cancel more often than that.
 ///
 /// @dev Holds no funds and can't change anything but the rate model. The pool must name this
 ///      contract as its `rateController`. The owner can still set any model directly on the pool.
@@ -28,7 +30,7 @@ contract RateController is Ownable2Step {
 
     /// @notice Time between a proposal and the earliest moment it can be executed.
     uint256 public immutable delay;
-    /// @notice Minimum time between an executed switch and the agent's next proposal.
+    /// @notice Minimum time from the agent's last proposal, and from the last executed switch, to its next proposal.
     uint256 public immutable cooldown;
     /// @notice How long an executable proposal stays executable before it expires.
     uint256 public immutable gracePeriod;
@@ -51,6 +53,9 @@ contract RateController is Ownable2Step {
 
     /// @notice Time of the last executed switch (0 = never).
     uint256 public lastExecutedAt;
+
+    /// @notice Time of the agent's last proposal, including cancelled and expired ones (0 = never).
+    uint256 public lastProposedAt;
 
     event AgentUpdated(address indexed agent);
     event ModelApproved(address indexed model);
@@ -138,10 +143,10 @@ contract RateController is Ownable2Step {
         if (address(pending.model) != address(0) && block.timestamp <= pending.executableAt + gracePeriod) {
             revert ProposalPending();
         }
-        if (lastExecutedAt != 0 && block.timestamp < lastExecutedAt + cooldown) {
-            revert CooldownActive(lastExecutedAt + cooldown);
-        }
+        uint256 nextAllowed = _nextProposalAllowed();
+        if (block.timestamp < nextAllowed) revert CooldownActive(nextAllowed);
         uint256 executableAt = block.timestamp + delay;
+        lastProposedAt = block.timestamp;
         pending = Proposal(model, uint64(executableAt));
         emit SwitchProposed(address(model), executableAt);
     }
@@ -184,9 +189,19 @@ contract RateController is Ownable2Step {
         return pool.interestRateModel();
     }
 
+    /// @notice Earliest time the agent may propose again (cooldown only; a pending proposal also blocks).
+    function nextProposalAllowed() external view returns (uint256) {
+        return _nextProposalAllowed();
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Internal
     // ---------------------------------------------------------------------------------------------
+
+    function _nextProposalAllowed() internal view returns (uint256 next) {
+        if (lastProposedAt != 0) next = lastProposedAt + cooldown;
+        if (lastExecutedAt != 0 && lastExecutedAt + cooldown > next) next = lastExecutedAt + cooldown;
+    }
 
     function _approve(IInterestRateModel model) internal {
         if (address(model) == address(0)) revert ZeroAddress();

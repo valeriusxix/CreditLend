@@ -56,7 +56,7 @@ Once a day the agent sends a plain-text market snapshot to the model `AGENT_MODE
 **The AI only advises.** Plain code then applies strict rules:
 - any malformed answer means no action;
 - only one step at a time (lower ↔ normal ↔ higher);
-- nothing while a switch is pending or within 24 hours of the last one.
+- nothing while a switch is pending or within 24 hours of the last proposal or switch.
 
 The contract enforces the rest: approved menu only, 6 hours' public notice, guardian can cancel. Proposals are only sent if `RATE_PROPOSALS_ENABLED=true`. Otherwise the report says what it *would* have proposed.
 

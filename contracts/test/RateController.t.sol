@@ -161,9 +161,12 @@ contract RateControllerTest is BaseTest {
         rc.execute();
         assertEq(address(pool.interestRateModel()), address(irm));
 
-        _propose(lower); // a cancelled proposal doesn't start a cooldown
-        vm.prank(owner);
-        rc.cancel();
+        // A cancelled proposal still starts the cooldown (approved 2026-10-22): a stolen agent key can't
+        // keep re-proposing after every cancel.
+        uint256 nextAllowed = rc.lastProposedAt() + COOLDOWN;
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(RateController.CooldownActive.selector, nextAllowed));
+        rc.propose(lower);
     }
 
     function test_removedModel_blocksPendingSwitch() public {
@@ -207,6 +210,46 @@ contract RateControllerTest is BaseTest {
         new RateController(p, owner, agent, none, DELAY, COOLDOWN, 0); // no grace period
         vm.expectRevert(RateController.ZeroAddress.selector);
         new RateController(IRateControlledPool(address(0)), owner, agent, none, DELAY, COOLDOWN, GRACE);
+    }
+
+    function test_cooldown_countsFromProposal_evenIfCancelled() public {
+        uint256 proposedAt = block.timestamp;
+        _propose(higher);
+        assertEq(rc.lastProposedAt(), proposedAt);
+        assertEq(rc.nextProposalAllowed(), proposedAt + COOLDOWN);
+        vm.prank(guardian);
+        rc.cancel();
+
+        vm.warp(proposedAt + COOLDOWN - 1);
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(RateController.CooldownActive.selector, proposedAt + COOLDOWN));
+        rc.propose(lower);
+
+        vm.warp(proposedAt + COOLDOWN);
+        _propose(lower);
+    }
+
+    /// A compromised agent key can force at most one cancel per cooldown on the guardian.
+    function test_stolenAgentKey_atMostOneProposalPerCooldown() public {
+        uint256 start = block.timestamp;
+        uint256 proposals;
+        for (uint256 h; h < 72; ++h) {
+            vm.warp(start + h * 1 hours);
+            vm.prank(agent);
+            try rc.propose(h % 2 == 0 ? higher : lower) {
+                ++proposals;
+                vm.prank(guardian);
+                rc.cancel();
+            } catch {}
+        }
+        assertEq(proposals, 3, "72 hours: one proposal per 24 hours");
+    }
+
+    function test_cooldown_alsoCountsFromExecution() public {
+        _propose(higher);
+        vm.warp(block.timestamp + DELAY);
+        rc.execute();
+        assertEq(rc.nextProposalAllowed(), block.timestamp + COOLDOWN, "later of proposal+24h and execution+24h");
     }
 
     // ------------------------------------------------------------------ pool hook
