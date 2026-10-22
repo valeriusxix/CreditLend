@@ -116,7 +116,7 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
 - **When the price is $1 or near it,** Orbio's buyer fee can exceed the 5% liquidation bonus. If the fee were raised to its 10% maximum, liquidating near face value would be unprofitable.
 - **Seizing an unpriceable asset itself is impossible.** If a borrower's *only* collateral is unpriceable, liquidation waits until its price returns.
 - **`Deploy.s.sol` deploys `CreditPriceOracle`** (with a `FixedPriceOracle` holding only USDG = $1 as its base). After deployment someone must keep calling `update()`: the agent (`../agent`) does, hourly or every 5 minutes. Until then, and for the ~30-hour warm-up, the $CREDIT settlement price sits at or near $1.
-- After deployment, `CollateralManager` **and** `CreditLendPool` ownership are **pending** until the timelock executes `acceptOwnership()` on each. Until then the deployer still owns them. The deployer holds them only to list USDG and set the borrow caps in the same deployment.
+- **When `Deploy.s.sol` finishes, the 2-day timelock already owns** `CollateralManager` and `CreditLendPool`, and the deployer's wallet holds no role (AUDIT.md H-1). The timelock is created with no delay so the same deployment can make it accept ownership; it then sets its own 2-day delay and the deployer renounces its temporary roles. `ADMIN_MULTISIG` must not be the deployer's address. Proven by `test/fork/DeployOwnership.t.sol` (`FOUNDRY_PROFILE=fork forge test`).
 - Not audited yet.
 
 ## Next (spec §9)

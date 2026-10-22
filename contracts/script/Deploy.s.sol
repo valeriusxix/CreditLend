@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {CreditLendPool} from "../src/CreditLendPool.sol";
 import {CollateralManager} from "../src/CollateralManager.sol";
@@ -21,10 +22,9 @@ import {RateController, IRateControlledPool} from "../src/RateController.sol";
 ///   ADMIN_MULTISIG=0x... GUARDIAN=0x... AGENT=0x... forge script script/Deploy.s.sol --fork-url robinhood
 /// AGENT is optional (default: none); the timelock can set it later with RateController.setAgent.
 ///
-/// After deployment, the CollateralManager AND CreditLendPool ownership transfers are PENDING: the
-/// timelock must schedule + execute `acceptOwnership()` on each (Ownable2Step). Until then the
-/// deployer remains their owner. The deployer owns them briefly only to list USDG and set the
-/// borrow caps in the same deployment.
+/// When the script ends, the 2-day timelock OWNS the CollateralManager and the CreditLendPool (ownership
+/// accepted, not merely pending) and the deployer's wallet holds no role anywhere (AUDIT.md H-1). The
+/// deployer owns the two contracts only for the few transactions that list USDG and set the caps.
 contract Deploy is Script {
     address constant CREDIT = 0xE33322DA1380e61E5Ae5DfB21e7f62924c73004C;
     address constant USDG = 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168;
@@ -82,6 +82,16 @@ contract Deploy is Script {
     uint16 constant USDG_BONUS_BPS = 500;
     uint256 constant USDG_SUPPLY_CAP = 200_000e6;
 
+    // What was deployed, readable by tests (test/fork/DeployOwnership.t.sol).
+    address public deployer;
+    CreditLendPool internal _pool;
+    CollateralManager internal _cm;
+    TimelockController internal _timelock;
+
+    function deployed() external view returns (CreditLendPool, CollateralManager, TimelockController) {
+        return (_pool, _cm, _timelock);
+    }
+
     function run() external {
         address admin = vm.envAddress("ADMIN_MULTISIG");
         address guardian = vm.envAddress("GUARDIAN");
@@ -90,10 +100,17 @@ contract Deploy is Script {
         require(IERC20Metadata(CREDIT).decimals() == 6, "CREDIT decimals changed");
 
         vm.startBroadcast();
+        // The wallet actually sending the transactions (with --ledger or --account it may differ from msg.sender).
+        (, deployer,) = vm.readCallers();
 
-        address[] memory admins = new address[](1);
-        admins[0] = admin;
-        TimelockController timelock = new TimelockController(TIMELOCK_DELAY, admins, admins, address(0));
+        require(admin != deployer, "ADMIN_MULTISIG must not be the deployer: the deployer gives up its roles");
+
+        // The timelock starts with NO delay and the deployer as a temporary proposer/executor, so this same
+        // deployment can make it accept ownership. It then sets its own 2-day delay and the deployer
+        // renounces every role (below), so nothing is left pending for a hot key to abuse.
+        address[] memory roles = new address[](2);
+        (roles[0], roles[1]) = (admin, deployer);
+        TimelockController timelock = new TimelockController(0, roles, roles, address(0));
 
         // USDG stays fixed at $1 (no trustworthy on-chain USDG/USD feed).
         address[] memory assets = new address[](1);
@@ -115,7 +132,7 @@ contract Deploy is Script {
         );
         require(oracle.credit() == CREDIT, "exchange is not for this CREDIT");
 
-        CollateralManager cm = new CollateralManager(msg.sender, CREDIT, oracle);
+        CollateralManager cm = new CollateralManager(deployer, CREDIT, oracle);
         cm.listAsset(USDG, true, USDG_LTV_BPS, USDG_LT_BPS, USDG_BONUS_BPS, USDG_SUPPLY_CAP);
         cm.transferOwnership(address(timelock));
 
@@ -129,7 +146,7 @@ contract Deploy is Script {
             IERC20Metadata(CREDIT),
             cm,
             irm,
-            msg.sender,
+            deployer,
             guardian,
             RESERVE_FACTOR_BPS,
             MAX_UTILIZATION_BPS,
@@ -150,10 +167,14 @@ contract Deploy is Script {
         pool.setRateController(address(rateController));
         pool.transferOwnership(address(timelock));
 
+        _handOver(timelock, address(cm), address(pool));
+
         vm.stopBroadcast();
+        (_pool, _cm, _timelock) = (pool, cm, timelock);
 
         require(pool.maxDebtPerAccount() == MAX_DEBT_PER_ACCOUNT && pool.maxTotalBorrows() == MAX_TOTAL_BORROWS);
-        require(pool.pendingOwner() == address(timelock) && cm.pendingOwner() == address(timelock));
+        require(pool.owner() == address(timelock) && cm.owner() == address(timelock), "timelock must own the market");
+        _requireHandedOver(timelock, admin);
         require(pool.rateController() == address(rateController) && rateController.owner() == address(timelock));
         require(rateController.menu().length == 3 && rateController.isApproved(irm) && rateController.agent() == agent);
 
@@ -169,5 +190,34 @@ contract Deploy is Script {
         console.log("RateController    ", address(rateController), "agent:", agent);
         console.log("  lower model     ", address(menu[0]));
         console.log("  higher model    ", address(menu[2]));
+    }
+
+    /// @dev Inside the broadcast: the timelock (still at delay 0) accepts both contracts and sets its own
+    ///      2-day delay in one batch, then the deployer renounces every timelock role it was given.
+    function _handOver(TimelockController timelock, address cm, address pool) internal {
+        address[] memory targets = new address[](3);
+        (targets[0], targets[1], targets[2]) = (cm, pool, address(timelock));
+        bytes[] memory calls = new bytes[](3);
+        calls[0] = abi.encodeCall(Ownable2Step.acceptOwnership, ());
+        calls[1] = abi.encodeCall(Ownable2Step.acceptOwnership, ());
+        calls[2] = abi.encodeCall(TimelockController.updateDelay, (TIMELOCK_DELAY));
+        uint256[] memory values = new uint256[](3);
+        timelock.scheduleBatch(targets, values, calls, bytes32(0), bytes32(0), 0);
+        timelock.executeBatch(targets, values, calls, bytes32(0), bytes32(0));
+
+        timelock.renounceRole(timelock.PROPOSER_ROLE(), deployer);
+        timelock.renounceRole(timelock.CANCELLER_ROLE(), deployer);
+        timelock.renounceRole(timelock.EXECUTOR_ROLE(), deployer);
+    }
+
+    function _requireHandedOver(TimelockController timelock, address admin) internal view {
+        require(timelock.getMinDelay() == TIMELOCK_DELAY, "timelock delay");
+        require(
+            !timelock.hasRole(timelock.PROPOSER_ROLE(), deployer) && !timelock.hasRole(timelock.EXECUTOR_ROLE(), deployer)
+                && !timelock.hasRole(timelock.CANCELLER_ROLE(), deployer)
+                && !timelock.hasRole(timelock.DEFAULT_ADMIN_ROLE(), deployer),
+            "deployer kept a timelock role"
+        );
+        require(timelock.hasRole(timelock.PROPOSER_ROLE(), admin) && timelock.hasRole(timelock.EXECUTOR_ROLE(), admin));
     }
 }

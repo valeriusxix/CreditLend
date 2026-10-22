@@ -45,6 +45,10 @@ Even after the timelock takes over, a compromised admin multisig can do the same
 - Impact: up to 90% of lender principal in one transaction.
 - Likelihood: needs the deployer key (during the window) or the admin multisig (after it).
 
+**Status (2026-10-22):**
+- **The deploy window is fixed** (branch `fix/h1-deploy-ownership`). `Deploy.s.sol` now makes the timelock *accept* ownership and set its 2-day delay inside the deployment, and the deployer renounces every role. Proven by `test/fork/DeployOwnership.t.sol`, which failed before the fix ("pool owned by the timelock: deployer != timelock") and passes after.
+- **Still open, by design:** the timelock itself can still set any oracle, with 2 days' notice. Some owner must be able to change the oracle; bounding how far a new oracle may move prices is a possible extra safeguard, not yet decided.
+
 **Test:** `test_H1_ownerCanDrainLendersThroughSetOracle_evenWithOwnershipPending`
 1. A lender deposits 100,000 CREDIT.
 2. The owner calls `transferOwnership(timelock)`; the test checks that the owner hasn't changed yet.
