@@ -87,7 +87,7 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
 - Rounding always favors lenders: debt rounds up, and collateral paid out rounds down.
 - `LTV < LT` and `LT × (1 + bonus) ≤ 100%` are enforced for every asset, so a liquidation at HF = 1 never creates bad debt.
 - Close factor: 50% of debt per liquidation, or 100% when HF < 0.95 or debt ≤ `minDebt` (dust).
-- Bad debt is written off once a borrower has no collateral left. Reserves absorb it first, and any remainder lowers the cCREDIT share price.
+- Bad debt is written off once a liquidation leaves the borrower with less than $1 of collateral in total, so a dust deposit can't hide an unpayable debt (AUDIT.md M-2). The dust stays with the borrower. Collateral whose price can't be read right now always blocks the write-off. Reserves absorb the loss first, and any remainder lowers the cCREDIT share price.
 - Fee-on-transfer behavior is rejected (`_pullExact`), because CREDIT and USDG are both upgradeable proxies.
 - Pausing never blocks repay, liquidate, lender withdrawals or collateral withdrawals. Only the timelocked owner can unpause.
 - New borrows are rejected above 90% utilization, keeping a liquidity buffer for lenders.

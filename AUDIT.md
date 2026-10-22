@@ -114,6 +114,12 @@ There is no admin function to write off debt, so it stays hidden until someone l
 - Code: `CreditLendPool.liquidate` (`if (remaining > 0 && !_hasCollateral(borrower)) _realizeBadDebt(...)`), `_hasCollateral`, `depositCollateral` (`onBehalfOf`).
 - Precondition: an underwater position (collateral worth less than the debt), and a second listed collateral asset or simply a leftover atom of the first.
 
+**Status (2026-10-22): fixed** (branch `fix/m2-dust-bad-debt`).
+- A liquidation now writes off the unpaid debt when the borrower's leftover collateral is worth **less than $1 in total** (`DUST_COLLATERAL_VALUE`). The dust stays with the borrower.
+- If any leftover collateral has no price right now, the debt is kept, as before.
+- The cost to lenders is at most what under $1 of dust could have repaid. Leaving $1 or more instead just gets liquidated at a profit.
+- New test `test_liquidation_dustCollateral_doesNotBlockBadDebtWriteOff` failed before (223.8 CREDIT stuck) and passes after. Guard test `test_liquidation_meaningfulLeftoverCollateral_isNotWrittenOff` ($20 left is liquidated, not written off) passes before and after.
+
 **Test:** `test_M2_dustCollateralHidesBadDebt_firstLenderOutEscapes`
 1. Two lenders deposit 1,000 each; a borrower borrows 700 against 1,000 USDG; USDG falls to $0.50.
 2. The first lender sends the borrower 1 wei of ORBIO; the liquidation then takes all the USDG.

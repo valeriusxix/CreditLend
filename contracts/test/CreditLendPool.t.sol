@@ -335,6 +335,49 @@ contract CreditLendPoolTest is BaseTest {
         assertApproxEqAbs(pool.totalAssets(), assetsBefore - (badDebt - reservesBefore), 2, "lenders take the rest");
     }
 
+    /// AUDIT.md M-2: one atom of another collateral, sent by anyone just before the liquidation, used to
+    /// stop the write-off. The unpaid debt stayed counted as a lender asset, so the first lender out got
+    /// everything back and the last one carried the whole loss.
+    function test_liquidation_dustCollateral_doesNotBlockBadDebtWriteOff() public {
+        address lender2 = makeAddr("lender2");
+        _lend(lender, 1_000 * ONE_CREDIT);
+        _lend(lender2, 1_000 * ONE_CREDIT);
+        _postCollateral(borrower, usdg, 1_000 * ONE_USDG);
+        _borrow(borrower, 700 * ONE_CREDIT);
+        oracle.setPrice(address(usdg), 0.5e18); // collateral $500 < debt 700
+
+        orbio.mint(lender, 1); // a lender who knows the trick sends the borrower 1 wei of ORBIO
+        vm.startPrank(lender);
+        orbio.approve(address(pool), 1);
+        pool.depositCollateral(address(orbio), 1, borrower);
+        vm.stopPrank();
+
+        _liquidate(borrower, address(usdg), 700 * ONE_CREDIT);
+        assertEq(pool.debtOf(borrower), 0, "unpaid debt written off despite the dust");
+        assertEq(pool.collateralOf(borrower, address(orbio)), 1, "dust stays with the borrower");
+
+        uint256 shares = pool.balanceOf(lender);
+        vm.prank(lender);
+        assertLt(pool.redeem(shares, lender, lender), 900 * ONE_CREDIT, "first lender out shares the loss");
+    }
+
+    /// The dust rule must not write off debt that real collateral can still pay: $1 or more left over is
+    /// liquidated as usual.
+    function test_liquidation_meaningfulLeftoverCollateral_isNotWrittenOff() public {
+        _lend(lender, 2_000 * ONE_CREDIT);
+        _postCollateral(borrower, usdg, 1_000 * ONE_USDG);
+        _postCollateral(borrower, orbio, 40e18); // $20 at $0.50
+        _borrow(borrower, 700 * ONE_CREDIT);
+        oracle.setPrice(address(usdg), 0.5e18);
+
+        _liquidate(borrower, address(usdg), 700 * ONE_CREDIT); // takes all the USDG
+        uint256 left = pool.debtOf(borrower);
+        assertGt(left, 0, "$20 of ORBIO can still repay part: not written off");
+        (uint256 repaid,) = _liquidate(borrower, address(orbio), left);
+        assertGt(repaid, 0);
+        assertEq(pool.debtOf(borrower), 0, "written off once the ORBIO is gone");
+    }
+
     // ============================================================ pause semantics
 
     function test_pause_onlyBlocksRiskIncreasingActions() public {

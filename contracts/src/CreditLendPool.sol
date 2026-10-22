@@ -64,6 +64,9 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
 
     uint256 public constant MAX_RESERVE_FACTOR_BPS = 5_000;
     uint256 public constant MAX_UTILIZATION_CAP_BPS = 9_900;
+    /// @notice Leftover collateral worth less than this (WAD USD, all assets together) no longer stops an
+    ///         unpayable debt from being written off at liquidation (AUDIT.md M-2).
+    uint256 public constant DUST_COLLATERAL_VALUE = 1e18; // $1
 
     // ---------------------------------------------------------------------------------------------
     // Immutables
@@ -494,9 +497,11 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
         collateralOf[borrower][collateralAsset] = available - seized;
         totalCollateral[collateralAsset] -= seized;
 
-        // A position with debt but no collateral can never be repaid by liquidation: write it off.
+        // A position with debt but no collateral worth liquidating can never be repaid: write it off.
+        // "Worth liquidating" is $1 or more in total, so a dust deposit (anyone may deposit for anyone)
+        // can't keep an unpayable debt on the books (AUDIT.md M-2). The dust stays with the borrower.
         uint256 remaining = debt - repaid;
-        if (remaining > 0 && !_hasCollateral(borrower)) _realizeBadDebt(borrower, remaining);
+        if (remaining > 0 && _collateralIsDust(borrower)) _realizeBadDebt(borrower, remaining);
 
         // Interactions
         _pullExact(credit, msg.sender, repaid);
@@ -697,12 +702,21 @@ contract CreditLendPool is ERC4626, Ownable2Step, ReentrancyGuard {
         }
     }
 
-    function _hasCollateral(address borrower) internal view returns (bool) {
+    /// @dev True when the borrower's remaining collateral is worth less than DUST_COLLATERAL_VALUE in total.
+    ///      Any remaining collateral whose price can't be read right now counts as NOT dust (it may be
+    ///      worth a lot once its price returns), so the debt is then kept, as before.
+    function _collateralIsDust(address borrower) internal view returns (bool) {
         address[] memory assets = collateralManager.getListedAssets();
+        uint256 total;
         for (uint256 i; i < assets.length; ++i) {
-            if (collateralOf[borrower][assets[i]] > 0) return true;
+            uint256 balance = collateralOf[borrower][assets[i]];
+            if (balance == 0) continue;
+            (bool priced, uint256 value,,) = collateralManager.tryCollateralValue(assets[i], balance);
+            if (!priced) return false;
+            total += value;
+            if (total >= DUST_COLLATERAL_VALUE) return false;
         }
-        return false;
+        return true;
     }
 
     /// @dev Pulls exactly `amount`, rejecting fee-on-transfer or otherwise non-standard behavior
