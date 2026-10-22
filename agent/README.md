@@ -51,7 +51,7 @@ One known risk: if someone else liquidates the same position between the purchas
 
 ### The daily AI review
 
-Once a day the agent sends a plain-text market snapshot to the model `AGENT_MODEL` (default `anthropic/claude-opus-5.5`, Orbio's name for Claude Opus 5.5) through the Orbio gateway, paid from the Orbio API balance (about $0.05 a day). The agent reads `agent/.env`, not the project's root `.env`, so copy `ORBIO_API_KEY` and `ANTHROPIC_BASE_URL` across. **Not yet tested against the live gateway**: run `npm run once` with the key set and check the log for the daily report. The model replies with a short report and one of `lower` / `normal` / `higher` / `keep`.
+Once a day the agent sends a plain-text market snapshot to the model `AGENT_MODEL` (default `anthropic/claude-opus-5.5`, Orbio's name for Claude Opus 5.5) through the Orbio gateway, paid from the Orbio API balance (a test call on 2026-10-22 cost $0.016, so about $0.50/month). The agent reads `agent/.env`, not the project's root `.env`, so copy `ORBIO_API_KEY` and `ANTHROPIC_BASE_URL` across. Tested against the live gateway on 2026-10-22: the reply parsed correctly. The model replies with a short report and one of `lower` / `normal` / `higher` / `keep`.
 
 **The AI only advises.** Plain code then applies strict rules:
 - any malformed answer means no action;
