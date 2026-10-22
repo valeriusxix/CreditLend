@@ -93,6 +93,11 @@ The README already lists a slower "drag the price down 2%/hour" attack. This "fo
 - Code: `CreditPriceOracle.update` (divergence compared with `lastRawPrice`, which rejected readings overwrite); `getPrice` (stale means `FACE_VALUE`).
 - Mitigating: positions must already be below health 1 to be liquidated.
 
+**Status (2026-10-22): fixed** (branch `fix/m1-oracle-staleness`).
+- A reading now passes the breaker if it is within 25% of the last *recorded* price, or of any of the last 4 readings. An honest reading after a fake one therefore still matches the recorded price.
+- A fake that repeats within 4 readings can be accepted, but only at the 2%/hour speed limit, and the next honest reading lifts the price straight back.
+- New test `test_breaker_interleavedFakeReadings_cannotForceStale` failed before the fix (the oracle went stale) and passes after (the oracle stays fresh, price $0.54–0.56). All earlier oracle tests pass unchanged.
+
 **Test:** `test_M1_attackerForcesOracleStale_settlementSnapsToOneDollar`
 1. 40 hours of honest $0.55 readings.
 2. 30 slots alternating attacker $0.10 and honest $0.55: **0 accepted**, the oracle is stale, and `getPrice` returns $1.

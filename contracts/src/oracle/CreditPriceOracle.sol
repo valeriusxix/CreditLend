@@ -21,12 +21,13 @@ import {IOrbioExchange} from "../interfaces/IOrbioExchange.sol";
 ///            - Too soon:   readings must be at least `minInterval` apart (reverts).
 ///            - Incomplete: the quote didn't fill the whole size (thin book or the 64-order work
 ///                          limit). Rejected; nothing recorded.
-///            - Divergent:  the reading is more than `maxDeviationBps` away from the PREVIOUS raw
-///                          reading. Rejected, but remembered: an identical reading next time is
-///                          accepted. A one-off spike (e.g. fake asks placed and cancelled in one
-///                          transaction) is thrown away; a real move is confirmed one interval later.
-///                          It compares reading-to-reading, not reading-to-our-average, so it can
-///                          never lock the oracle onto a stale price.
+///            - Divergent:  the reading is more than `maxDeviationBps` away from BOTH the last recorded
+///                          price AND each of the last `CONFIRM_READINGS` raw readings. Rejected, but
+///                          remembered: a similar reading within the next few is accepted. A one-off
+///                          spike (e.g. fake asks placed and cancelled in one transaction) is thrown
+///                          away; a real move is confirmed one interval later. Because honest readings
+///                          are also compared with the recorded price, a fake reading slipped in
+///                          between them can't get them rejected and force the oracle stale (AUDIT M-1).
 ///            - Speed limit: the recorded price may fall at most `maxDropBpsPerHour` per hour.
 ///                          Rises are not limited (up to $1). Faking a low price is free on this
 ///                          book; faking a high one costs real purchases.
@@ -81,8 +82,14 @@ contract CreditPriceOracle is IPriceOracle {
     uint256 private _newest;
     uint256 private _count;
 
-    /// @notice Last complete reading, accepted or not (the divergence check compares against it).
+    /// @notice How many recent readings (accepted or not) a new reading may be confirmed by.
+    uint256 public constant CONFIRM_READINGS = 4;
+
+    /// @notice Last complete reading, accepted or not.
     uint256 public lastRawPrice;
+    /// @dev The last CONFIRM_READINGS complete readings, accepted or not (0 = empty slot).
+    uint256[CONFIRM_READINGS] private _recentRaw;
+    uint256 private _recentNext;
     uint256 public lastReadingTime;
 
     enum ReadingStatus {
@@ -151,9 +158,11 @@ contract CreditPriceOracle is IPriceOracle {
         if (raw > FACE_VALUE) raw = FACE_VALUE;
         if (raw == 0) raw = 1;
 
-        uint256 previousRaw = lastRawPrice;
+        bool known = _matchesRecent(raw);
         lastRawPrice = raw;
-        if (previousRaw != 0 && _diffBps(raw, previousRaw) > maxDeviationBps) {
+        _recentRaw[_recentNext] = raw;
+        _recentNext = (_recentNext + 1) % CONFIRM_READINGS;
+        if (!known) {
             emit ReadingTaken(ReadingStatus.RejectedDivergent, raw, 0);
             return (ReadingStatus.RejectedDivergent, 0);
         }
@@ -251,6 +260,26 @@ contract CreditPriceOracle is IPriceOracle {
         }
         if (covered == 0) return _observations[_newest].price; // reading taken in this very block
         return weighted.ceilDiv(covered);
+    }
+
+    /// @dev A reading passes the divergence breaker if it is within `maxDeviationBps` of the last RECORDED
+    ///      price or of any of the last CONFIRM_READINGS readings (rejected ones included, which is how a
+    ///      real move is confirmed). Comparing with the recorded price too means a fake reading slipped in
+    ///      between honest ones can't make the honest ones look divergent (AUDIT.md M-1). With nothing to
+    ///      compare against (a brand-new oracle), the reading passes.
+    function _matchesRecent(uint256 raw) internal view returns (bool) {
+        bool anyReference;
+        if (_count != 0) {
+            anyReference = true;
+            if (_diffBps(raw, _observations[_newest].price) <= maxDeviationBps) return true;
+        }
+        for (uint256 i; i < CONFIRM_READINGS; ++i) {
+            uint256 r = _recentRaw[i];
+            if (r == 0) continue;
+            anyReference = true;
+            if (_diffBps(raw, r) <= maxDeviationBps) return true;
+        }
+        return !anyReference;
     }
 
     function _diffBps(uint256 a, uint256 b) internal pure returns (uint256) {

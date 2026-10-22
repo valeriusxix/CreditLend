@@ -275,4 +275,18 @@ contract CreditPriceOracleTest is BaseTest {
             }
         }
     }
+    /// AUDIT.md M-1: a fake reading slipped in between honest ones must not make the honest ones look
+    /// "divergent". Before the fix every reading was rejected, the oracle went stale and the price
+    /// snapped to $1 while the book said $0.55.
+    function test_breaker_interleavedFakeReadings_cannotForceStale() public {
+        _converge();
+        for (uint256 i; i < 30; ++i) {
+            vm.warp(block.timestamp + 5 minutes);
+            _read(i % 2 == 0 ? 0.10e18 : 0.55e18); // attacker's fake ask, then the honest agent
+        }
+        assertTrue(po.isFresh(), "honest readings still get through");
+        uint256 price = po.getPrice(address(credit));
+        assertLt(price, 0.56e18, "not the $1 fallback");
+        assertGe(price, 0.54e18, "fakes barely move it");
+    }
 }
