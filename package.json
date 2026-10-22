@@ -7,12 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test test/*.test.js",
+    "abis": "node scripts/export-abis.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.60.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "viem": "2.57.3"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

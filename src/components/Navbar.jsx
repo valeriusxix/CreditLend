@@ -1,12 +1,19 @@
 import { useState } from 'react'
-import { Menu, Moon, Search, X } from 'lucide-react'
+import { Menu, Moon, Search, Sun, X } from 'lucide-react'
 import creditLendLogo from '../assets/creditlend.png'
 import Button from './Button.jsx'
+import ConnectButton from './ConnectButton.jsx'
 import NavLinks from './NavLinks.jsx'
+import SearchDialog from './SearchDialog.jsx'
 
-function Navbar() {
+function Navbar({ inApp = false, wallet, theme, onToggleTheme }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const closeMenu = () => setMenuOpen(false)
+  // Inside the app the call to action is the wallet; on the landing page it opens the app.
+  const cta = inApp
+    ? <ConnectButton wallet={wallet} />
+    : <Button className="nav-cta" href="#app">Launch App <span aria-hidden="true">↗</span></Button>
 
   return (
     <header className="site-header">
@@ -21,14 +28,14 @@ function Navbar() {
         <NavLinks className="navbar-center" />
 
         <div className="navbar-actions">
-          <button className="icon-button" type="button" aria-label="Search">
+          <button className="icon-button" type="button" aria-label="Search" onClick={() => setSearchOpen(true)}>
             <Search size={19} strokeWidth={1.8} />
           </button>
-          <button className="icon-button theme-button" type="button" aria-label="Dark theme">
-            <Moon size={18} fill="currentColor" strokeWidth={1.5} />
+          <button className="icon-button theme-button" type="button" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={onToggleTheme}>
+            {theme === 'dark' ? <Moon size={18} fill="currentColor" strokeWidth={1.5} /> : <Sun size={18} strokeWidth={1.8} />}
           </button>
           <a className="docs-link" href="#docs">Docs</a>
-          <Button className="nav-cta" href="#app">Launch App <span aria-hidden="true">↗</span></Button>
+          {cta}
           <button
             className="icon-button menu-toggle"
             type="button"
@@ -44,11 +51,16 @@ function Navbar() {
 
       {menuOpen && (
         <div className="mobile-navigation" id="mobile-navigation">
-          <NavLinks onNavigate={closeMenu} />
+          <NavLinks onNavigate={closeMenu} stacked />
           <a className="mobile-docs" href="#docs" onClick={closeMenu}>Docs</a>
-          <Button href="#app" onClick={closeMenu}>Launch App <span aria-hidden="true">↗</span></Button>
+          <button className="mobile-docs" type="button" onClick={() => { onToggleTheme(); closeMenu() }}>
+            {theme === 'dark' ? 'Light theme' : 'Dark theme'}
+          </button>
+          {inApp ? <ConnectButton wallet={wallet} /> : <Button href="#app" onClick={closeMenu}>Launch App <span aria-hidden="true">↗</span></Button>}
         </div>
       )}
+
+      <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   )
 }
