@@ -95,9 +95,9 @@ Once a day, with `AGENT_TOKEN_ADDRESS` set, the agent:
 
 Almost all of the money comes from trading volume on the token. The agent costs about $8–16 a month: ETH for gas, plus about $0.50 of AI. **The launchpad never pays in ETH.** So:
 
-- **Gas:** top up the agent wallet with ETH by hand. The ETH alert tells you when.
+- **Gas:** top up the agent wallet with ETH by hand. The ETH warning tells you when, but it runs only once `AGENT_TOKEN_ADDRESS` is set. Until then, check the wallet's ETH yourself.
 - **AI review:** paid from your Orbio API balance as before.
-- **If the market needs CREDIT for the agent:** the timelock can send part of the pool's interest reserves with `reduceReserves(amount, agentWallet)`. That is a 2-day timelock action, and it pays CREDIT, not ETH.
+- **If the agent needs CREDIT:** the timelock can send part of the pool's interest reserves with `reduceReserves(amount, agentWallet)`. That is a 2-day timelock action, and it pays CREDIT, not ETH. The reserves are the pool's cushion against bad debt, so every CREDIT moved out is less protection for lenders.
 
 ### Alerts
 
