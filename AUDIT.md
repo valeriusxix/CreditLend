@@ -62,6 +62,13 @@ Even after the timelock takes over, a compromised admin multisig can do the same
 
 The code documents this as a deliberate choice ("decision A" in `CreditLendPool` and `ICredit`). Borrowed tokens are treated as spent the moment they leave the pool, and lenders are protected only by over-collateralization. Debt is valued at $1 per CREDIT, which is above its market price, and borrowing stops at 70% of collateral. So the *economic* risk is much smaller than the spec implies. **But it plainly contradicts a rule the spec calls non-negotiable, and AGENT.md §10's success metric ("liquidations cover debt when $CREDIT is activated") is not met.** Either the code or the spec needs to change.
 
+**Status (2026-10-22): skipped. A spec decision, not a code bug.**
+1. **Activation can't be seen on-chain.** It happens in the borrower's own wallet, on tokens that are interchangeable with any other $CREDIT they hold. A contract can't read past events or tell borrowed tokens from others.
+2. **The literal rule would cover every loan.** The spec also covers "transfer to a wallet that can activate it", and every wallet can activate, so every loan would be liquidatable the moment it is paid out.
+3. **The goal behind the rule is already met.** Borrowed $CREDIT is treated as spent from the start and fully backed by collateral, with debt counted at $1.
+
+Recommended: reword AGENT.md §2.2 / §5 / §10 to say exactly that. Owner's decision.
+
 **Test:** `test_H2_activationOfBorrowedCredit_doesNotTriggerLiquidation`
 1. The borrower borrows 500 CREDIT and calls `credit.activate(500)`.
 2. The health factor is still at least 1.
