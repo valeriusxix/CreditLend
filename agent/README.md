@@ -6,7 +6,7 @@ The off-chain half of build priority 3 (spec §4.2, §6 "Agent Operational Loop"
 cd agent
 npm install
 cp .env.example .env      # then fill it in
-npm test                  # 51 tests, no network
+npm test                  # 69 tests, no network
 npm run once              # one check, then exit
 npm start                 # run forever (one check a minute)
 ```
@@ -21,6 +21,7 @@ npm start                 # run forever (one check a minute)
 | Hourly | Measures liquidator profit by size on the live order book and warns if the borrow caps are too big for it | nothing |
 | As soon as allowed | Executes a pending rate switch once its 6-hour notice has passed | wallet with gas |
 | Daily | AI review via the Orbio gateway: a short report and a rate recommendation | `ORBIO_API_KEY` |
+| Daily | Launchpad funding: claims staking rewards, reports income, warns before ETH for gas runs out | `AGENT_TOKEN_ADDRESS` |
 
 Without a wallet (`AGENT_PRIVATE_KEY` empty) it runs **read-only**: monitoring and alerts only, no transactions.
 
@@ -60,6 +61,44 @@ Once a day the agent sends a plain-text market snapshot to the model `AGENT_MODE
 
 The contract enforces the rest: approved menu only, 6 hours' public notice, guardian can cancel. Proposals are only sent if `RATE_PROPOSALS_ENABLED=true`. Otherwise the report says what it *would* have proposed.
 
+### Funding (Orbio agent launchpad)
+
+The agent can be paid for by its own token. The owner launches it on the [Orbio agent launchpad](https://www.orbio.so/launchpad), and the trading fees on that token fund the agent. **Launching is the owner's own step; nothing here launches anything.**
+
+**When you launch, set the agent wallet to the agent's own address** (the `AGENT_PRIVATE_KEY` wallet), not your own. If you don't, the launchpad pays your wallet instead, and the agent can't claim. You can fix it afterwards with `setAgentWallet` on the Orbio vault, which only the launching wallet can call. The agent sends a critical alert if this is wrong.
+
+How the fees are split (checked on 2026-10-22 against the live launch terms and the vault contract itself):
+
+| Share of the token's creator fees | What happens to it | Does the agent need to do anything? |
+|---|---|---|
+| 50% | Staked as $ORBIO for the agent; earns CREDIT every hour | **Yes, claim it.** The agent does this daily |
+| 30% | Sold and minted to the agent wallet as CREDIT tokens | No, it arrives by itself |
+| 10% | Sold and added to the agent wallet's Orbio API balance (minted as CREDIT instead once that balance reaches $5,000) | No, it arrives by itself |
+| 10% | Orbio treasury | No |
+
+Orbio's launchpad FAQ ("50/45/5") and its SDK README ("5%") are out of date. Its docs also call the functions `claimAgentCredit`/`harvestAgents`; the contract's real names are `claimCredit`/`harvest`.
+
+Once a day, with `AGENT_TOKEN_ADDRESS` set, the agent:
+
+- checks that the launchpad pays **its** wallet (critical alert if not);
+- claims the staking rewards once at least `FUNDING_MIN_CLAIM_CREDIT` (default 1) is waiting. By default it claims them **as CREDIT tokens**, which the liquidator uses first;
+- warns when the Orbio API balance is below `GATEWAY_BALANCE_FLOOR_USD` (default $20);
+- warns (critical) when its ETH would last less than 14 days;
+- sends a short report covering the last 30 days' income, the rewards waiting, the stake, and its CREDIT, API balance and ETH runway.
+
+**Claiming into API balance (`FUNDING_ACTIVATE`, off by default).** Through the vault this is fee-free (a normal wallet pays 5%), but it can't be undone, and the balance goes to **the agent wallet's own Orbio account**. Only switch it on if `ORBIO_API_KEY` was created in that same account, by signing in to orbio.so with the agent wallet. Otherwise the AI review keeps spending your account while the earned balance sits unused in another.
+
+**Be realistic about the income.** Across the first 2,076 launchpad agents (about 4 weeks):
+- 74% earned nothing;
+- the top 10% earned more than about $21, and 4.6% more than $100;
+- staking paid about $305 in total across all of them.
+
+Almost all of the money comes from trading volume on the token. The agent costs about $8–16 a month: ETH for gas, plus about $0.50 of AI. **The launchpad never pays in ETH.** So:
+
+- **Gas:** top up the agent wallet with ETH by hand. The ETH alert tells you when.
+- **AI review:** paid from your Orbio API balance as before.
+- **If the market needs CREDIT for the agent:** the timelock can send part of the pool's interest reserves with `reduceReserves(amount, agentWallet)`. That is a 2-day timelock action, and it pays CREDIT, not ETH.
+
 ### Alerts
 
 Alerts always go to the log. To also get them in a chat, set `ALERT_WEBHOOK_URL` (a Discord or Slack incoming webhook) and/or `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`. The same alert repeats at most once an hour.
@@ -81,6 +120,7 @@ Alerts always go to the log. To also get them in a chat, set `ALERT_WEBHOOK_URL`
 | `src/liquidator.js` | Plan and execute a liquidation |
 | `src/monitors.js` | Order-book depth and manipulation checks |
 | `src/review.js` | Daily AI review and the rules that gate its recommendation |
+| `src/funding.js` | Launchpad funding rules: when to claim, ETH runway, the daily report |
 | `src/alerts.js` | Log, webhook and Telegram alerts |
 | `src/chain.js` | Every blockchain read and write (viem) |
 | `src/config.js`, `src/abis.js`, `src/index.js` | Settings, contract interfaces, entry point |

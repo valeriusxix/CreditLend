@@ -2,12 +2,14 @@
 //   every tick    check every borrower's health; liquidate (if enabled); take an oracle reading when due
 //   every hour    measure liquidator margins on the order book; sample utilization
 //   every day     LLM review: report + rate recommendation (proposed only if allowed and enabled)
+//   every day     launchpad funding: claim staking rewards, report income, warn on low ETH (if configured)
 // It also executes a pending rate switch once its public delay is over (anyone may; it costs only gas).
 import { WAD, classifyHealth, quoteCostPerCredit, diffBps } from './risk.js'
 import { readingMode, readingDue } from './schedule.js'
 import { bookDepthCheck, manipulationCheck } from './monitors.js'
 import { planLiquidation, executeLiquidation } from './liquidator.js'
 import { labelModels, labelOf, buildSnapshot, runReview, decideProposal } from './review.js'
+import { fetchGatewayBalance, planClaim, ethRunwayDays, walletProblem, fundingReport, fmtCredit, ETH_WARN_DAYS } from './funding.js'
 
 const HOUR = 3600
 const DAY = 24 * HOUR
@@ -34,12 +36,16 @@ export class Keeper {
     this.bookRows = []
     this.utilizationHistory = []
     this.lastReviewAt = null
+    this.launchpadId = null
+    this.lastFundingAt = null
+    this.fetch = globalThis.fetch
   }
 
   async init() {
     await this.chain.init()
     const { number } = await this.chain.now()
     const perHour = await this.chain.blocksPerHour()
+    this.blocksPerHour = perHour
     this.borrowerCursor = BigInt(this.cfg.poolDeployBlock ?? 0)
     const lookback = number - perHour * 3n
     this.readingCursor = lookback > this.borrowerCursor ? lookback : this.borrowerCursor
@@ -91,6 +97,12 @@ export class Keeper {
     if (this.complete && (this.lastReviewAt == null || now >= this.lastReviewAt + DAY)) {
       this.lastReviewAt = now
       await this._review(now, oracle)
+    }
+
+    // ---- launchpad funding
+    if (this.cfg.agentToken && (this.lastFundingAt == null || now >= this.lastFundingAt + DAY)) {
+      this.lastFundingAt = now
+      await this._funding(number)
     }
 
     return { now, mode: mode.mode, positions: positions.length }
@@ -254,6 +266,61 @@ export class Keeper {
       }
     } catch (err) {
       await this.alerter.send({ key: 'review-failed', level: 'warn', text: `Daily review failed: ${err?.message ?? err}` })
+    }
+  }
+
+  // ------------------------------------------------------------------------------ launchpad funding
+
+  async _funding(number) {
+    try {
+      const token = this.cfg.agentToken
+      if (this.launchpadId == null) {
+        const id = await this.chain.agentIdOf(token)
+        const record = id === 0n ? null : await this.chain.launchpadAgent(id)
+        if (!record || record.token.toLowerCase() !== token.toLowerCase()) {
+          await this.alerter.send({ key: 'launchpad-unknown', level: 'warn', text: `AGENT_TOKEN_ADDRESS ${token} is not a token launched on the Orbio agent launchpad. Launchpad funding is paused until it is.` })
+          return
+        }
+        this.launchpadId = id
+      }
+      const id = this.launchpadId
+      const record = await this.chain.launchpadAgent(id)
+
+      const problem = walletProblem({ agentWallet: record.agentWallet, owner: record.owner, agentAddress: this.chain.address })
+      if (problem) await this.alerter.send({ key: 'launchpad-wallet', level: 'critical', text: `Launchpad funding: ${problem}` })
+
+      const gateway = this.cfg.orbioApiKey ? await fetchGatewayBalance({ apiKey: this.cfg.orbioApiKey, fetchFn: this.fetch }) : null
+      if (gateway && !gateway.ok) this.log.warn(`could not read the Orbio API balance (${gateway.status})`)
+      if (gateway?.ok && gateway.availableMicroUsd < this.cfg.gatewayFloor) {
+        await this.alerter.send({ key: 'gateway-low', level: 'warn', text: `The Orbio API balance is $${fmtCredit(gateway.availableMicroUsd)}, below the $${fmtCredit(this.cfg.gatewayFloor)} floor. The daily AI review stops when it runs out.` })
+      }
+
+      let claimed = null
+      const owed = await this.chain.creditOwed(id)
+      const plan = planClaim({ owed, minClaim: this.cfg.fundingMinClaim, activateEnabled: this.cfg.fundingActivate, gatewayMicroUsd: gateway?.ok ? gateway.availableMicroUsd : null, floorMicroUsd: this.cfg.gatewayFloor })
+      if (plan.claim && this.chain.address && !problem) {
+        try {
+          const { hash } = await this.chain.claimCredit(id, plan.activate)
+          claimed = { amount: owed, activate: plan.activate, hash }
+        } catch (err) {
+          await this.alerter.send({ key: 'launchpad-claim-failed', level: 'warn', text: `Claiming launchpad staking rewards failed: ${err?.shortMessage ?? err?.message ?? err}` })
+        }
+      }
+
+      let runwayDays = null
+      if (this.chain.address) {
+        const [balanceWei, gasPriceWei] = await Promise.all([this.chain.ethBalance(), this.chain.gasPrice()])
+        runwayDays = ethRunwayDays({ balanceWei, gasPriceWei })
+        if (runwayDays != null && runwayDays < ETH_WARN_DAYS) {
+          await this.alerter.send({ key: 'eth-low', level: 'critical', text: `The agent wallet has about ${runwayDays} days of ETH left for gas. Send it ETH: launchpad income is paid in CREDIT and can't pay for gas.` })
+        }
+      }
+
+      const from = number > this.blocksPerHour * 720n ? number - this.blocksPerHour * 720n : 0n
+      const [income, creditBalance] = await Promise.all([this.chain.launchpadIncome(id, from, number), this.chain.address ? this.chain.balanceOf(this.cfg.credit) : 0n])
+      await this.alerter.send({ key: `funding-${number}`, level: 'info', text: fundingReport({ agentId: id, owed: claimed ? 0n : owed, stakeWei: record.stakeWei, income, creditBalance, gateway, runwayDays, claimed }) })
+    } catch (err) {
+      await this.alerter.send({ key: 'funding-failed', level: 'warn', text: `Launchpad funding check failed: ${err?.shortMessage ?? err?.message ?? err}` })
     }
   }
 }

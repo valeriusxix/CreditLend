@@ -2,7 +2,7 @@
 // so tests replace it with a fake and never touch the network.
 import { createPublicClient, createWalletClient, defineChain, http, BaseError, ContractFunctionRevertedError } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { poolAbi, collateralManagerAbi, oracleAbi, rateControllerAbi, rateModelAbi, exchangeAbi, erc20Abi, READING_STATUS, MAX_FILLS } from './abis.js'
+import { poolAbi, collateralManagerAbi, oracleAbi, rateControllerAbi, rateModelAbi, exchangeAbi, agentVaultAbi, erc20Abi, READING_STATUS, MAX_FILLS } from './abis.js'
 
 export function robinhoodChain(rpcUrl) {
   return defineChain({
@@ -119,11 +119,11 @@ export class ChainAdapter {
     return this._txFrom.get(hash)
   }
 
-  async _logs({ address, event, fromBlock, toBlock }) {
+  async _logs({ address, event, args, fromBlock, toBlock }) {
     const out = []
     for (let from = fromBlock; from <= toBlock; from += LOG_CHUNK) {
       const to = from + LOG_CHUNK - 1n < toBlock ? from + LOG_CHUNK - 1n : toBlock
-      out.push(...(await this.client.getLogs({ address, event, fromBlock: from, toBlock: to })))
+      out.push(...(await this.client.getLogs({ address, event, args, fromBlock: from, toBlock: to })))
     }
     return out
   }
@@ -233,5 +233,42 @@ export class ChainAdapter {
 
   executeRateSwitch() {
     return this._write(this.cfg.rateController, rateControllerAbi, 'execute')
+  }
+
+  // ---------------------------------------------------------------- Orbio launchpad (agent funding)
+
+  agentIdOf(token) {
+    return this._read(this.cfg.agentVault, agentVaultAbi, 'agentIdOf', [token])
+  }
+
+  launchpadAgent(agentId) {
+    return this._read(this.cfg.agentVault, agentVaultAbi, 'agentOf', [agentId])
+  }
+
+  creditOwed(agentId) {
+    return this._read(this.cfg.agentVault, agentVaultAbi, 'creditOwed', [agentId])
+  }
+
+  /// Simulated first (in _write), so "nothing to claim" costs no gas.
+  claimCredit(agentId, activate) {
+    return this._write(this.cfg.agentVault, agentVaultAbi, 'claimCredit', [agentId, activate])
+  }
+
+  /// Everything the launchpad paid this agent between two blocks, in CREDIT/USDG atoms.
+  async launchpadIncome(agentId, fromBlock, toBlock) {
+    const sum = async (name, field) => {
+      const logs = await this._logs({ address: this.cfg.agentVault, event: agentVaultAbi.find((x) => x.name === name), args: { agentId }, fromBlock, toBlock })
+      return logs.reduce((s, l) => s + l.args[field], 0n)
+    }
+    const [creditMinted, gatewayUsdg, stakingClaimed] = await Promise.all([sum('CreditMinted', 'creditAtoms'), sum('FeesConverted', 'usdgAtoms'), sum('CreditClaimed', 'creditAtoms')])
+    return { creditMinted, gatewayUsdg, stakingClaimed }
+  }
+
+  ethBalance() {
+    return this.client.getBalance({ address: this.address })
+  }
+
+  gasPrice() {
+    return this.client.getGasPrice()
   }
 }

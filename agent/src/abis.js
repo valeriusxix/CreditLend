@@ -70,6 +70,23 @@ export const exchangeAbi = parseAbi([
   'function feeBps() view returns (uint16)',
 ])
 
+// Orbio's agent launchpad vault (UUPS proxy 0x0e16...c35b). Copied from the verified OrbioAgentVault
+// source (Sourcify, implementation 0x8624...Fb86). The docs' names `claimAgentCredit`/`harvestAgents`
+// are the SDK's; the contract's are `claimCredit`/`harvest`.
+export const agentVaultAbi = parseAbi([
+  'struct Agent { address token; address receiver; address owner; address agentWallet; bytes32 beneficiary; uint64 launchedAt; uint16 feeBps; uint64 carryEpoch; uint256 stakeWei; int256 carrySeconds; uint256 indexSeen; uint256 creditOwed; }',
+  'function agentOf(uint256 agentId) view returns (Agent)',
+  'function agentIdOf(address token) view returns (uint256)',
+  'function creditOwed(uint256 agentId) view returns (uint256)',
+  'function claimCredit(uint256 agentId, bool activate) returns (uint256 creditAtoms)',
+  'error NothingToClaim()',
+  'error NotAuthorised()',
+  'error UnknownAgent()',
+  'event CreditMinted(uint256 indexed agentId, address indexed to, uint256 creditAtoms, uint256 usdgAtoms)',
+  'event FeesConverted(uint256 indexed agentId, address indexed recipient, uint256 orbioWei, uint256 usdgAtoms, uint256 pendingWei)',
+  'event CreditClaimed(uint256 indexed agentId, bytes32 indexed beneficiary, uint256 creditAtoms, bool activated)',
+])
+
 export const erc20Abi = parseAbi([
   'function balanceOf(address) view returns (uint256)',
   'function allowance(address, address) view returns (uint256)',

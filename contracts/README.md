@@ -121,5 +121,5 @@ The spec lets the agent tune interest rates (§4.1, §8). It does so only throug
 
 ## Next (spec §9)
 
-4. Orbio launchpad funding for the agent (spec §7).
+4. ~~Orbio launchpad funding for the agent (spec §7).~~ Done off-chain in `../agent` (the daily funding check), with no contract changes. Launching the agent's token is the owner's own step.
 5. Frontend.

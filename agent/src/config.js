@@ -6,6 +6,8 @@ export const ROBINHOOD = {
   credit: '0xE33322DA1380e61E5Ae5DfB21e7f62924c73004C',
   usdg: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168',
   exchange: '0x6951fFd32630b05e06F50062AEA801625A58eBC0',
+  // Orbio agent launchpad vault (matches https://www.orbio.so/api/protocol/agents/terms, 2026-10-22)
+  agentVault: '0x0E1651aEC67B2a049a4FA6aEb6C1c305aabfc35b',
 }
 
 const bool = (v) => /^(1|true|yes|on)$/i.test(v ?? '')
@@ -18,6 +20,14 @@ function address(env, name, { required = true } = {}) {
   }
   if (!isAddress(v, { strict: false })) throw new Error(`${name} is not a valid address`)
   return getAddress(v)
+}
+
+/// A whole or decimal amount of CREDIT (or dollars) as 6-decimal atoms.
+function credit(env, name, fallback) {
+  const v = env[name] || fallback
+  if (!/^\d+(\.\d{1,6})?$/.test(v)) throw new Error(`${name} must be a plain number like 1 or 0.5`)
+  const [whole, frac = ''] = v.split('.')
+  return BigInt(whole) * 1_000_000n + BigInt(frac.padEnd(6, '0'))
 }
 
 export function loadConfig(env = process.env) {
@@ -39,7 +49,15 @@ export function loadConfig(env = process.env) {
     minProfitBps: Number(env.LIQUIDATOR_MIN_PROFIT_BPS || '100'),
     rateProposalsEnabled: bool(env.RATE_PROPOSALS_ENABLED),
 
-    llm: env.ORBIO_API_KEY ? { apiKey: env.ORBIO_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, model: env.AGENT_MODEL || 'anthropic/claude-opus-5.5' } : null,
+    // Launchpad funding: on once the owner has launched the agent's token and set its address here.
+    agentVault: ROBINHOOD.agentVault,
+    agentToken: address(env, 'AGENT_TOKEN_ADDRESS', { required: false }),
+    fundingActivate: bool(env.FUNDING_ACTIVATE),
+    fundingMinClaim: credit(env, 'FUNDING_MIN_CLAIM_CREDIT', '1'),
+    gatewayFloor: credit(env, 'GATEWAY_BALANCE_FLOOR_USD', '20'),
+    orbioApiKey: env.ORBIO_API_KEY || null,
+
+    llm: env.ORBIO_API_KEY ?{ apiKey: env.ORBIO_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, model: env.AGENT_MODEL || 'anthropic/claude-opus-5.5' } : null,
 
     alerts: {
       webhookUrl: env.ALERT_WEBHOOK_URL || null,
@@ -60,6 +78,7 @@ export function describe(cfg, agentAddress) {
     `auto-liquidation: ${cfg.liquidatorEnabled ? `on (min profit ${cfg.minProfitBps / 100}%)` : 'off'}`,
     `daily AI review: ${cfg.llm ? `on (${cfg.llm.model})` : 'off (no ORBIO_API_KEY)'}`,
     `rate proposals: ${cfg.rateProposalsEnabled && cfg.rateController ? 'on' : 'off'}`,
+    `launchpad funding: ${cfg.agentToken ? `on (claims ${cfg.fundingActivate ? 'into API balance when low' : 'as CREDIT tokens'})` : 'off (no AGENT_TOKEN_ADDRESS)'}`,
     `chat alerts: ${[cfg.alerts.webhookUrl && 'webhook', cfg.alerts.telegramBotToken && cfg.alerts.telegramChatId && 'telegram'].filter(Boolean).join(' + ') || 'log only'}`,
   ].join(' | ')
 }
