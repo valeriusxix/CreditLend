@@ -47,7 +47,10 @@ Even after the timelock takes over, a compromised admin multisig can do the same
 
 **Status (2026-10-22):**
 - **The deploy window is fixed** (branch `fix/h1-deploy-ownership`). `Deploy.s.sol` now makes the timelock *accept* ownership and set its 2-day delay inside the deployment, and the deployer renounces every role. Proven by `test/fork/DeployOwnership.t.sol`, which failed before the fix ("pool owned by the timelock: deployer != timelock") and passes after.
-- **Still open, by design:** the timelock itself can still set any oracle, with 2 days' notice. Some owner must be able to change the oracle; bounding how far a new oracle may move prices is a possible extra safeguard, not yet decided.
+- **Accepted, by design:** the timelock itself can still set any oracle, with 2 days' notice. Bounding how far a new oracle may move prices was considered and rejected (2026-10-22), for three reasons:
+  - it would also stop the timelock quickly replacing a broken oracle in an emergency;
+  - a malicious owner could get around it with several small steps;
+  - the 2-day public notice is the real protection.
 
 **Test:** `test_H1_ownerCanDrainLendersThroughSetOracle_evenWithOwnershipPending`
 1. A lender deposits 100,000 CREDIT.
@@ -67,7 +70,7 @@ The code documents this as a deliberate choice ("decision A" in `CreditLendPool`
 2. **The literal rule would cover every loan.** The spec also covers "transfer to a wallet that can activate it", and every wallet can activate, so every loan would be liquidatable the moment it is paid out.
 3. **The goal behind the rule is already met.** Borrowed $CREDIT is treated as spent from the start and fully backed by collateral, with debt counted at $1.
 
-Recommended: reword AGENT.md §2.2 / §5 / §10 to say exactly that. Owner's decision.
+**Resolved:** AGENT.md §2.2, §5, §6, §8 and §10 were reworded on 2026-10-22 to say exactly that (branch `docs/agent-md-sync`).
 
 **Test:** `test_H2_activationOfBorrowedCredit_doesNotTriggerLiquidation`
 1. The borrower borrows 500 CREDIT and calls `credit.activate(500)`.
@@ -208,7 +211,9 @@ The missing interest only appears later, in one jump, when borrowers repay. Some
 This is the designed trade-off (the README documents the speed limit), but it is a real exposure.
 
 - Code: `CreditPriceOracle` (`twapWindow`, `maxDropBpsPerHour`), `CollateralManager.getDebtSettlementPrice`.
-**Status (2026-10-22): not changed. Needs the owner's decision.**
+**Status (2026-10-22): accepted, not changed.**
+- **Considered and rejected:** the "lower of average and live book" option below. It contradicts a deliberate, tested protection (`test_liquidation_usesStoredPrice_notLiveBook`): dumping the live book must not change the liquidation price.
+- **Why that protection wins:** keeping prices immune to same-transaction book manipulation is worth more to users than the crash-time saving.
 - **Why not:** the lag is the price of the oracle's manipulation protection (the 2%/hour fall limit). Removing it would let fake asks drag the price down.
 - **Option for the crash case:** pay liquidators at the LOWER of the recorded average and the live book. Faking the book lower in the same transaction would only reduce the liquidator's *own* pay, so it can't be abused, and in a real crash borrowers stop over-paying.
 - **Costs of that option:**
@@ -237,7 +242,7 @@ This is the designed trade-off (the README documents the speed limit), but it is
 - **Safety margin:** the code is already stricter than a 10–20% margin for health checks, because it values debt at $1.
 - **Agent's rate power:** narrower than the spec's, which is safer.
 
-Recommended: update AGENT.md §1, §4.1, §5 to match the code (owner's decision).
+**Resolved:** AGENT.md §1, §2.4, §4.1 and §5 were updated on 2026-10-22 to match the code (branch `docs/agent-md-sync`).
 
 ---
 
