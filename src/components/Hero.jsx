@@ -15,8 +15,8 @@ function Hero() {
           <span>Borrow with safeguards.</span>
         </h1>
         <p className="hero-description">
-          The $CREDIT money market on Robinhood Chain. Borrow against USDG or $ORBIO,
-          with activation-triggered liquidation and risk rules enforced on-chain.
+          The $CREDIT money market on Robinhood Chain. Borrow against USDG, with
+          health-factor liquidations and risk rules enforced on-chain.
         </p>
         <div className="hero-actions">
           <Button href="#app">Launch App <ArrowRight aria-hidden="true" size={16} /></Button>
