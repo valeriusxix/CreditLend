@@ -14,11 +14,19 @@ export function parseRoute(hash) {
 export function useHashRoute() {
   const [route, setRoute] = useState(() => parseRoute(window.location.hash))
   useEffect(() => {
-    const onChange = () => {
+    const onChange = (e) => {
       const next = parseRoute(window.location.hash)
+      const previous = parseRoute(e?.oldURL ? new URL(e.oldURL).hash : '')
       setRoute(next)
-      // Page changes start at the top; in-page anchors on the landing page scroll by themselves.
-      if (next.page !== 'home') window.scrollTo({ top: 0 })
+      // Only a change of page scrolls; switching tabs within the app keeps your place (on a phone the
+      // form sits below your position). The landing page's anchors (#top) exist only once it has
+      // rendered, so scroll to them on the next frame.
+      if (next.page === previous.page) return
+      requestAnimationFrame(() => {
+        const anchor = next.page === 'home' && next.section ? document.getElementById(next.section) : null
+        if (anchor) anchor.scrollIntoView()
+        else window.scrollTo({ top: 0 })
+      })
     }
     window.addEventListener('hashchange', onChange)
     return () => window.removeEventListener('hashchange', onChange)
