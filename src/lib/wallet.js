@@ -5,14 +5,20 @@ import { robinhood, RPC_URL, EXPLORER_URL } from './config.js'
 
 export const publicClient = createPublicClient({ chain: robinhood, transport: http(RPC_URL, { batch: true }), batch: { multicall: true } })
 
-/// The injected wallet, if any. In local development only, VITE_DEV_RPC (an anvil node, whose test
-/// accounts are unlocked) can stand in for one; that code is stripped from production builds.
-export async function getProvider() {
-  if (import.meta.env.DEV && import.meta.env.VITE_DEV_RPC) {
-    const { devProvider } = await import('./devProvider.js')
-    return devProvider(import.meta.env.VITE_DEV_RPC)
+/// In local development only (VITE_DEV_RPC = an anvil node), an extra "Local test account" wallet
+/// that uses anvil's unlocked test accounts. Stripped from production builds.
+export async function devWallet() {
+  if (!(import.meta.env.DEV && import.meta.env.VITE_DEV_RPC)) return null
+  const { devProvider } = await import('./devProvider.js')
+  return { id: 'dev', name: 'Local test account', icon: null, provider: devProvider(import.meta.env.VITE_DEV_RPC) }
+}
+
+/// On a local test copy, reads come from the copy but a real wallet would send to the real chain,
+/// where these contract addresses mean nothing (or something else). Never let that happen.
+export function assertCanSend(provider) {
+  if (import.meta.env.DEV && import.meta.env.VITE_DEV_RPC && !provider?.isDevProvider) {
+    throw new Error('This is a local test copy of the chain: real wallets can connect here but not send transactions. Use "Local test account", or the live site.')
   }
-  return typeof window !== 'undefined' ? window.ethereum ?? null : null
 }
 
 export const ROBINHOOD_HEX_ID = numberToHex(robinhood.id) // 0x1237
@@ -42,6 +48,7 @@ export function walletClientFor(provider, account) {
 
 /// Simulate (so a doomed transaction never reaches the wallet), send, and wait for it to be mined.
 export async function sendTx({ provider, account, address, abi, functionName, args }) {
+  assertCanSend(provider)
   const { request } = await publicClient.simulateContract({ address, abi, functionName, args, account })
   // Every pool action first adds the interest earned since the last one, which writes storage only
   // if time has passed. Gas is estimated at the latest block, so a transaction landing a second later

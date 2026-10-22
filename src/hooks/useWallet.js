@@ -1,118 +1,155 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getAddress } from 'viem'
-import { getProvider, switchToRobinhood } from '../lib/wallet.js'
+import { devWallet, switchToRobinhood } from '../lib/wallet.js'
+import { watchWallets } from '../lib/wallets.js'
 import { robinhood } from '../lib/config.js'
-import { friendlyError } from '../lib/errors.js'
+import { friendlyError, isUserRejection } from '../lib/errors.js'
 
-const DISCONNECTED_KEY = 'creditlend.disconnected'
+const WALLET_KEY = 'creditlend.wallet' // which wallet the user last connected (its id), to reconnect on reload
 
-function remember(key, value) {
+function stored() {
   try {
-    if (value) localStorage.setItem(key, '1')
-    else localStorage.removeItem(key)
+    return localStorage.getItem(WALLET_KEY)
   } catch {
-    // private mode: nothing to remember
+    return null
   }
 }
 
-function recalled(key) {
+function store(id) {
   try {
-    return localStorage.getItem(key) === '1'
+    if (id) localStorage.setItem(WALLET_KEY, id)
+    else localStorage.removeItem(WALLET_KEY)
   } catch {
-    return false
+    // private mode: the user reconnects after a reload
   }
 }
 
-/// The connected browser wallet: { provider, account, chainId, wrongNetwork, connect, disconnect, switchNetwork }.
+const firstAccount = (accounts) => (accounts?.[0] ? getAddress(accounts[0]) : null)
+
+/// The installed wallets, the one the user picked, and its account and network.
 export function useWallet() {
-  const [provider, setProvider] = useState(null)
+  const [detected, setDetected] = useState([])
+  const [dev, setDev] = useState(null)
+  const [active, setActive] = useState(null) // { id, name, icon, provider }
   const [account, setAccount] = useState(null)
   const [chainId, setChainId] = useState(null)
-  const [status, setStatus] = useState('idle') // idle | connecting
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [connectingId, setConnectingId] = useState(null)
+  const [pickerError, setPickerError] = useState(null)
   const [error, setError] = useState(null)
-  const [checked, setChecked] = useState(false)
+  const restoreTried = useRef(false)
 
+  const wallets = useMemo(() => (dev ? [dev, ...detected] : detected), [dev, detected])
+
+  // Find installed wallets (they announce themselves; more can appear later).
+  useEffect(() => watchWallets(setDetected), [])
   useEffect(() => {
     let alive = true
-    let p = null
-    const onAccounts = (accounts) => setAccount(accounts?.[0] ? getAddress(accounts[0]) : null)
+    devWallet().then((w) => { if (alive) setDev(w) })
+    return () => { alive = false }
+  }, [])
+
+  // Reconnect silently to the wallet used last time, if it still shares an account with this site.
+  useEffect(() => {
+    const id = stored()
+    const wallet = wallets.find((w) => w.id === id)
+    if (restoreTried.current || !wallet) return
+    restoreTried.current = true
+    Promise.all([wallet.provider.request({ method: 'eth_accounts' }), wallet.provider.request({ method: 'eth_chainId' })])
+      .then(([accounts, id_]) => {
+        const a = firstAccount(accounts)
+        if (!a) return
+        setActive(wallet)
+        setAccount(a)
+        setChainId(Number(id_))
+      })
+      .catch(() => {})
+  }, [wallets])
+
+  // Follow account and network changes made in the wallet itself.
+  useEffect(() => {
+    const p = active?.provider
+    if (!p?.on) return undefined
+    const onAccounts = (accounts) => {
+      const a = firstAccount(accounts)
+      setAccount(a)
+      if (!a) { setActive(null); store(null) } // locked or disconnected from the wallet's side
+    }
     const onChain = (id) => setChainId(Number(id))
-    getProvider().then(async (found) => {
-      if (!alive) return
-      p = found
-      setProvider(found)
-      if (found) {
-        found.on?.('accountsChanged', onAccounts)
-        found.on?.('chainChanged', onChain)
+    p.on('accountsChanged', onAccounts)
+    p.on('chainChanged', onChain)
+    return () => {
+      p.removeListener?.('accountsChanged', onAccounts)
+      p.removeListener?.('chainChanged', onChain)
+    }
+  }, [active])
+
+  const connectWith = useCallback(async (wallet) => {
+    setPickerError(null)
+    setError(null)
+    setConnectingId(wallet.id)
+    try {
+      const a = firstAccount(await wallet.provider.request({ method: 'eth_requestAccounts' }))
+      if (!a) throw new Error(`${wallet.name} did not share an account.`)
+      setActive(wallet)
+      setAccount(a)
+      store(wallet.id)
+      setPickerOpen(false)
+      const id = Number(await wallet.provider.request({ method: 'eth_chainId' }))
+      setChainId(id)
+      if (id !== robinhood.id) {
         try {
-          // eth_accounts never prompts: it only reports a connection the user already approved.
-          const [accounts, id] = await Promise.all([found.request({ method: 'eth_accounts' }), found.request({ method: 'eth_chainId' })])
-          if (!alive) return
-          setChainId(Number(id))
-          if (!recalled(DISCONNECTED_KEY)) onAccounts(accounts)
-        } catch {
-          // a locked wallet: the user connects with the button
+          await switchToRobinhood(wallet.provider)
+          setChainId(Number(await wallet.provider.request({ method: 'eth_chainId' })))
+        } catch (err) {
+          // Connected, but still on another network: the app shows a "Switch" button.
+          if (!isUserRejection(err)) setError(friendlyError(err))
         }
       }
-      setChecked(true)
-    })
-    return () => {
-      alive = false
-      p?.removeListener?.('accountsChanged', onAccounts)
-      p?.removeListener?.('chainChanged', onChain)
+    } catch (err) {
+      setPickerError(isUserRejection(err) ? `You cancelled the request in ${wallet.name}.` : friendlyError(err))
+    } finally {
+      setConnectingId(null)
     }
   }, [])
+
+  const disconnect = useCallback(() => {
+    // Also ask the wallet to forget this site where supported (MetaMask), so "Connect" asks again.
+    active?.provider?.request?.({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] }).catch(() => {})
+    store(null)
+    setActive(null)
+    setAccount(null)
+  }, [active])
 
   const switchNetwork = useCallback(async () => {
     setError(null)
     try {
-      await switchToRobinhood(provider)
-      setChainId(Number(await provider.request({ method: 'eth_chainId' })))
+      await switchToRobinhood(active.provider)
+      setChainId(Number(await active.provider.request({ method: 'eth_chainId' })))
     } catch (err) {
       setError(friendlyError(err))
     }
-  }, [provider])
-
-  const connect = useCallback(async () => {
-    setError(null)
-    if (!provider) {
-      setError('No browser wallet found. Install MetaMask, Rabby or Coinbase Wallet, then reload this page.')
-      return
-    }
-    setStatus('connecting')
-    try {
-      const accounts = await provider.request({ method: 'eth_requestAccounts' })
-      remember(DISCONNECTED_KEY, false)
-      setAccount(accounts?.[0] ? getAddress(accounts[0]) : null)
-      const id = Number(await provider.request({ method: 'eth_chainId' }))
-      setChainId(id)
-      if (id !== robinhood.id) {
-        await switchToRobinhood(provider)
-        setChainId(Number(await provider.request({ method: 'eth_chainId' })))
-      }
-    } catch (err) {
-      setError(friendlyError(err))
-    } finally {
-      setStatus('idle')
-    }
-  }, [provider])
-
-  const disconnect = useCallback(() => {
-    remember(DISCONNECTED_KEY, true)
-    setAccount(null)
-  }, [])
+  }, [active])
 
   return {
-    provider,
+    wallets,
+    provider: active?.provider ?? null,
+    walletName: active?.name ?? null,
+    walletIcon: active?.icon ?? null,
     account,
     chainId,
-    checked,
-    connecting: status === 'connecting',
     wrongNetwork: Boolean(account) && chainId != null && chainId !== robinhood.id,
-    error,
-    clearError: () => setError(null),
-    connect,
+    // Every "Connect wallet" button opens the picker.
+    connect: () => { setPickerError(null); setPickerOpen(true) },
+    connecting: connectingId != null,
+    connectingId,
+    pickerOpen,
+    pickerError,
+    closePicker: () => setPickerOpen(false),
+    connectWith,
     disconnect,
     switchNetwork,
+    error,
+    clearError: () => setError(null),
   }
 }
