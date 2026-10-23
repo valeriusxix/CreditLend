@@ -1,9 +1,10 @@
 // Browser-wallet connection (MetaMask, Rabby, Coinbase Wallet...) through the standard EIP-1193
 // `window.ethereum`. Reads never need the wallet; it only signs transactions.
-import { createPublicClient, createWalletClient, custom, http, getAddress, numberToHex } from 'viem'
-import { robinhood, RPC_URL, EXPLORER_URL } from './config.js'
+import { createWalletClient, custom, getAddress, numberToHex } from 'viem'
+import { robinhood, RPC_URLS, EXPLORER_URL } from './config.js'
+import { makePublicClient } from './rpc.js'
 
-export const publicClient = createPublicClient({ chain: robinhood, transport: http(RPC_URL, { batch: true }), batch: { multicall: true } })
+export const publicClient = makePublicClient(robinhood, RPC_URLS)
 
 /// In local development only (VITE_DEV_RPC = an anvil node), an extra "Local test account" wallet
 /// that uses anvil's unlocked test accounts. Stripped from production builds.

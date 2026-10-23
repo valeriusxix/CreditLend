@@ -1,6 +1,7 @@
 // Settings come from VITE_* variables (a root .env.local, or the hosting provider's settings).
 // Only VITE_-prefixed variables reach the browser, and nothing secret may ever be one.
 import { defineChain, getAddress, isAddress } from 'viem'
+import { rpcUrls } from './rpc.js'
 
 const env = import.meta.env
 
@@ -17,8 +18,10 @@ export const robinhood = defineChain({
   contracts: { multicall3: { address: '0xcA11bde05977b3631167028862bE2a173976CA11' } },
 })
 
-// Reads go here; the wallet is only used to send transactions.
-export const RPC_URL = env.VITE_RPC_URL || ROBINHOOD_RPC
+// Reads go to these servers, in order (the wallet is only used to send transactions). VITE_RPC_URL is the
+// main one; VITE_RPC_FALLBACK_URLS (comma-separated) are tried next if it fails; Robinhood's public
+// server is always the last resort.
+export const RPC_URLS = rpcUrls(env.VITE_RPC_URL || ROBINHOOD_RPC, env.VITE_RPC_FALLBACK_URLS)
 
 function optionalAddress(value) {
   if (!value) return null

@@ -26,7 +26,11 @@ Pages are chosen by the URL after `#`:
 - `#docs`: plain-English protocol docs.
 
 **How it talks to the chain:**
-- **Reads** go straight to Robinhood Chain's public RPC, so the market is visible without a wallet.
+- **Reads** come straight from Robinhood Chain, so the market is visible without a wallet.
+  - **Main server:** `VITE_RPC_URL`. Recommended: a dedicated provider such as Alchemy, with the key restricted to your domain.
+  - **Backups:** `VITE_RPC_FALLBACK_URLS`, tried automatically if the main one fails.
+  - **Last resort:** Robinhood's public server, always.
+  - Visitors only see "Could not reach Robinhood Chain" if every server fails.
 - **Transactions** go through the visitor's browser wallet. "Connect wallet" lists every wallet installed in the browser (MetaMask, Rabby, Coinbase Wallet, Phantom…, via the EIP-6963 standard) to pick one. On a phone, it offers to open the page inside the MetaMask or Coinbase Wallet app. The app then switches the wallet to Robinhood Chain (chain 4663), adding the network if the wallet doesn't know it, and reconnects to the same wallet on reload until you press Disconnect.
 - **Before asking for a signature**, every action is dry-run, so a transaction that would fail is explained in plain English instead.
 - **Approvals** are for the exact amount, never unlimited.
