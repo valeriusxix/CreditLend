@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Menu, Moon, Search, Sun, X } from 'lucide-react'
 import creditLendLogo from '../assets/creditlend.png'
 import Button from './Button.jsx'
@@ -13,17 +14,17 @@ function Navbar({ inApp = false, wallet, theme, onToggleTheme }) {
   // Inside the app the call to action is the wallet; on the landing page it opens the app.
   const cta = inApp
     ? <ConnectButton wallet={wallet} />
-    : <Button className="nav-cta" href="#app">Launch App <span aria-hidden="true">↗</span></Button>
+    : <Button className="nav-cta" to="/app">Launch App <span aria-hidden="true">↗</span></Button>
 
   return (
     <header className="site-header">
       <div className="navbar">
-        <a className="brand" href="#top" aria-label="CreditLend home">
+        <Link className="brand" to="/" aria-label="CreditLend home" onClick={() => window.scrollTo({ top: 0 })}>
           <span className="brand-mark" aria-hidden="true">
             <img src={creditLendLogo} alt="" />
           </span>
           <span>CreditLend</span>
-        </a>
+        </Link>
 
         <NavLinks className="navbar-center" />
 
@@ -34,7 +35,7 @@ function Navbar({ inApp = false, wallet, theme, onToggleTheme }) {
           <button className="icon-button theme-button" type="button" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={onToggleTheme}>
             {theme === 'dark' ? <Moon size={18} fill="currentColor" strokeWidth={1.5} /> : <Sun size={18} strokeWidth={1.8} />}
           </button>
-          <a className="docs-link" href="#docs">Docs</a>
+          <Link className="docs-link" to="/docs">Docs</Link>
           {cta}
           <button
             className="icon-button menu-toggle"
@@ -52,11 +53,11 @@ function Navbar({ inApp = false, wallet, theme, onToggleTheme }) {
       {menuOpen && (
         <div className="mobile-navigation" id="mobile-navigation">
           <NavLinks onNavigate={closeMenu} stacked />
-          <a className="mobile-docs" href="#docs" onClick={closeMenu}>Docs</a>
+          <Link className="mobile-docs" to="/docs" onClick={closeMenu}>Docs</Link>
           <button className="mobile-docs" type="button" onClick={() => { onToggleTheme(); closeMenu() }}>
             {theme === 'dark' ? 'Light theme' : 'Dark theme'}
           </button>
-          {inApp ? <ConnectButton wallet={wallet} /> : <Button href="#app" onClick={closeMenu}>Launch App <span aria-hidden="true">↗</span></Button>}
+          {inApp ? <ConnectButton wallet={wallet} /> : <Button to="/app" onClick={closeMenu}>Launch App <span aria-hidden="true">↗</span></Button>}
         </div>
       )}
 

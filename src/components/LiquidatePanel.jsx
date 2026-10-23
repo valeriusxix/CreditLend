@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
 import poolAbi from '../abi/CreditLendPool.json'
 import AmountField from './AmountField.jsx'
@@ -54,7 +55,7 @@ function LiquidatePanel({ market, wallet, walletAccount, refresh }) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.address} className={selected === r.address ? 'is-selected' : ''}>
-                  <td><a href={`#app/account/${r.address}`}>{shortAddress(r.address)}</a></td>
+                  <td><Link to={`/app/account/${r.address}`}>{shortAddress(r.address)}</Link></td>
                   <td>{fmtAmount(r.debt, market.credit.decimals)} {market.credit.symbol}</td>
                   <td><span className={`hf hf--${healthBand(r.healthFactor)}`}>{fmtHealth(r.healthFactor)}</span></td>
                   <td>

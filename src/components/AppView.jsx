@@ -1,3 +1,4 @@
+import { Link, useNavigate } from 'react-router-dom'
 import { isAddress, getAddress } from 'viem'
 import { TriangleAlert } from 'lucide-react'
 import ActionPanel from './ActionPanel.jsx'
@@ -12,6 +13,7 @@ const ACTION_TABS = ['lend', 'collateral', 'borrow', 'repay']
 
 /// The lending app (#app...). `route.section`: overview | lend | collateral | borrow | repay | liquidate | account.
 function AppView({ route, wallet }) {
+  const navigate = useNavigate()
   const lookup = route.section === 'account' && isAddress(route.extra ?? '', { strict: false }) ? getAddress(route.extra) : null
   const viewing = lookup ?? wallet.account
   const { market, account, error, loading, refresh } = useMarket(viewing)
@@ -30,8 +32,8 @@ function AppView({ route, wallet }) {
           <h1 className="app-title">{section === 'liquidate' ? 'Liquidations' : lookup ? 'Account lookup' : 'Lend & borrow'}</h1>
         </div>
         <nav className="app-tabs" aria-label="App sections">
-          <a className={section !== 'liquidate' && !lookup ? 'is-active' : ''} href="#app">Lend & borrow</a>
-          <a className={section === 'liquidate' ? 'is-active' : ''} href="#app/liquidate">Liquidate</a>
+          <Link className={section !== 'liquidate' && !lookup ? 'is-active' : ''} to="/app">Lend & borrow</Link>
+          <Link className={section === 'liquidate' ? 'is-active' : ''} to="/app/liquidate">Liquidate</Link>
         </nav>
       </div>
 
@@ -69,7 +71,7 @@ function AppView({ route, wallet }) {
               {account
                 ? <PositionCard market={market} account={account} />
                 : <ConnectPrompt wallet={wallet} />}
-              <ActionPanel market={market} account={account} wallet={wallet} refresh={refresh} tab={tab} onTab={(t) => { window.location.hash = `app/${t}` }} />
+              <ActionPanel market={market} account={account} wallet={wallet} refresh={refresh} tab={tab} onTab={(t) => navigate(`/app/${t}`)} />
             </div>
           )}
 

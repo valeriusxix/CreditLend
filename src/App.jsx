@@ -4,13 +4,13 @@ import Footer from './components/Footer.jsx'
 import AppView from './components/AppView.jsx'
 import DocsView from './components/DocsView.jsx'
 import WalletModal from './components/WalletModal.jsx'
-import { useHashRoute } from './hooks/useHashRoute.js'
+import { useRoute } from './hooks/useRoute.js'
 import { useTheme } from './hooks/useTheme.js'
 import { useWallet } from './hooks/useWallet.js'
 import './styles/app.css'
 
 function App() {
-  const route = useHashRoute()
+  const route = useRoute()
   const { theme, toggle } = useTheme()
   const wallet = useWallet()
 

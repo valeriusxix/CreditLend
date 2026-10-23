@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { POOL_ADDRESS, explorerAddress } from '../lib/config.js'
 
 const SECTIONS = [
@@ -28,7 +29,7 @@ function DocsView({ section }) {
     <div className="docs-view" id="docs">
       <aside className="docs-nav" aria-label="Docs sections">
         {SECTIONS.map(([id, label]) => (
-          <a key={id} href={`#docs/${id}`} className={section === id ? 'is-active' : ''}>{label}</a>
+          <Link key={id} to={`/docs/${id}`} className={section === id ? 'is-active' : ''}>{label}</Link>
         ))}
       </aside>
       <article className="docs-body">
@@ -78,7 +79,7 @@ function DocsView({ section }) {
             The $CREDIT used is valued at its market price, capped at $1, so liquidators aren&apos;t overpaid when $CREDIT trades below $1.
             Liquidating, repaying and withdrawing can never be paused.
           </p>
-          <p>The <a href="#app/liquidate">Liquidate</a> page lists every open position, riskiest first.</p>
+          <p>The <Link to="/app/liquidate">Liquidate</Link> page lists every open position, riskiest first.</p>
         </section>
 
         <section id="docs-agent">

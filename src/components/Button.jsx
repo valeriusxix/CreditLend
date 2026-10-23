@@ -1,14 +1,24 @@
-function Button({ children, variant = 'primary', href, className = '', onClick, type = 'button', disabled = false }) {
-  // With an href it is a link (as before); without one it is a real button that can be disabled.
+import { Link } from 'react-router-dom'
+
+function Button({ children, variant = 'primary', to, href, className = '', onClick, type = 'button', disabled = false }) {
+  const classes = `button button--${variant} ${className}`
+  // `to` is a page inside the app (clean URL, no reload); `href` is an outside link; neither: a real button.
+  if (to !== undefined) {
+    return (
+      <Link className={classes} to={to} onClick={onClick}>
+        {children}
+      </Link>
+    )
+  }
   if (href !== undefined) {
     return (
-      <a className={`button button--${variant} ${className}`} href={href} onClick={onClick}>
+      <a className={classes} href={href} onClick={onClick}>
         {children}
       </a>
     )
   }
   return (
-    <button className={`button button--${variant} ${className}`} type={type} onClick={onClick} disabled={disabled}>
+    <button className={classes} type={type} onClick={onClick} disabled={disabled}>
       {children}
     </button>
   )

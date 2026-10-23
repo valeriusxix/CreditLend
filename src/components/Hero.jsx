@@ -19,8 +19,8 @@ function Hero() {
           health-factor liquidations and risk rules enforced on-chain.
         </p>
         <div className="hero-actions">
-          <Button href="#app">Launch App <ArrowRight aria-hidden="true" size={16} /></Button>
-          <Button variant="secondary" href="#docs">Read the Litepaper <ArrowDownRight aria-hidden="true" size={16} /></Button>
+          <Button to="/app">Launch App <ArrowRight aria-hidden="true" size={16} /></Button>
+          <Button variant="secondary" to="/docs">Read the Litepaper <ArrowDownRight aria-hidden="true" size={16} /></Button>
         </div>
         <div className="hero-footnote">
           <Sparkles aria-hidden="true" size={14} />

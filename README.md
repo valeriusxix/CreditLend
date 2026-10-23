@@ -19,11 +19,13 @@ npm run lint
 npm run build                # static site in dist/, host it anywhere
 ```
 
-Pages are chosen by the URL after `#`:
-- `#app`: lend, collateral, borrow and repay, with your health factor;
-- `#app/liquidate`: every open position, riskiest first, with a liquidate button;
-- `#app/account/0x…`: anyone's position (also reachable from the search button);
-- `#docs`: plain-English protocol docs.
+Pages have clean addresses (React Router; old `/#app` links redirect automatically):
+- `/app`: lend, collateral, borrow and repay, with your health factor;
+- `/app/liquidate`: every open position, riskiest first, with a liquidate button;
+- `/app/account/0x…`: anyone's position (also reachable from the search button);
+- `/docs`: plain-English protocol docs.
+
+Because these are real paths, the web host must send every path to `index.html`. `vercel.json` (Vercel) and `public/_redirects` (Netlify) already do this. For any other host, add the equivalent "single-page app" rewrite.
 
 **How it talks to the chain:**
 - **Reads** come straight from Robinhood Chain, so the market is visible without a wallet.

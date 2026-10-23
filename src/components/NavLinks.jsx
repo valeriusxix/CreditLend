@@ -1,25 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ChevronDown } from 'lucide-react'
 
 const links = [
   {
     label: 'Markets',
-    href: '#app',
+    href: '/app',
     dropdown: [
-      { label: 'Lend & borrow', href: '#app' },
-      { label: 'Liquidations', href: '#app/liquidate' },
-      { label: 'How lending works', href: '#docs/lending' },
+      { label: 'Lend & borrow', href: '/app' },
+      { label: 'Liquidations', href: '/app/liquidate' },
+      { label: 'How lending works', href: '/docs/lending' },
     ],
   },
   {
     label: 'Agent',
-    href: '#docs/agent',
+    href: '/docs/agent',
     dropdown: [
-      { label: 'What the agent does', href: '#docs/agent' },
-      { label: 'Rate settings & limits', href: '#docs/governance' },
+      { label: 'What the agent does', href: '/docs/agent' },
+      { label: 'Rate settings & limits', href: '/docs/governance' },
     ],
   },
-  { label: 'Governance', href: '#docs/governance' },
+  { label: 'Governance', href: '/docs/governance' },
 ]
 
 function NavLinks({ className = '', onNavigate, stacked = false }) {
@@ -43,10 +44,10 @@ function NavLinks({ className = '', onNavigate, stacked = false }) {
   return (
     <nav ref={ref} className={`nav-links ${className}`} aria-label="Main navigation">
       {links.map(({ label, href, dropdown }) => {
-        if (!dropdown) return <a key={label} className="nav-link" href={href} onClick={navigate}>{label}</a>
+        if (!dropdown) return <Link key={label} className="nav-link" to={href} onClick={navigate}>{label}</Link>
         // On the mobile menu the sub-links are listed in full; on desktop they open on click.
         if (stacked) {
-          return dropdown.map((item) => <a key={item.href + item.label} className="nav-link" href={item.href} onClick={navigate}>{item.label}</a>)
+          return dropdown.map((item) => <Link key={item.href + item.label} className="nav-link" to={item.href} onClick={navigate}>{item.label}</Link>)
         }
         return (
           <div key={label} className="nav-dropdown">
@@ -56,7 +57,7 @@ function NavLinks({ className = '', onNavigate, stacked = false }) {
             </button>
             {open === label && (
               <div className="nav-menu">
-                {dropdown.map((item) => <a key={item.label} href={item.href} onClick={navigate}>{item.label}</a>)}
+                {dropdown.map((item) => <Link key={item.label} to={item.href} onClick={navigate}>{item.label}</Link>)}
               </div>
             )}
           </div>
