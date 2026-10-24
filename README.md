@@ -25,7 +25,9 @@ Pages have clean addresses (React Router; old `/#app` links redirect automatical
 - `/app/account/0x…`: anyone's position (also reachable from the search button);
 - `/docs`: plain-English protocol docs.
 
-Because these are real paths, the web host must send every path to `index.html`. `vercel.json` (Vercel) and `public/_redirects` (Netlify) already do this. For any other host, add the equivalent "single-page app" rewrite.
+Because these are real paths, the web host must send every path to `index.html`. `render.yaml` (Render), `vercel.json` (Vercel) and `public/_redirects` (Netlify) already do this. For any other host, add the equivalent "single-page app" rewrite.
+
+**Hosting on Render:** New > Blueprint > this repository. `render.yaml` sets the build (`npm ci && npm run build`, Node 24, publish `dist/`), the rewrite, and the mainnet `VITE_POOL_ADDRESS` / `VITE_POOL_DEPLOY_BLOCK`. Add `VITE_RPC_URL` (and backups) in the site's Environment tab. `VITE_` values are baked in at build time, so changing one needs a new deploy.
 
 **How it talks to the chain:**
 - **Reads** come straight from Robinhood Chain, so the market is visible without a wallet.

@@ -1,0 +1,30 @@
+# Render Blueprint for the CreditLend website: a static site (Render's free tier is enough).
+# In Render: New > Blueprint > pick this repository. Render reads this file and creates the site.
+services:
+  - type: web
+    name: creditlend
+    runtime: static
+    # `npm ci` installs exactly what package-lock.json lists, the versions tested locally.
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      # Vite 8 needs Node 20.19+ or 22.12+; this is the version the build is tested with.
+      - key: NODE_VERSION
+        value: 24.15.0
+      # Public values from the mainnet deployment (contracts/broadcast/Deploy.s.sol/4663/run-latest.json).
+      - key: VITE_POOL_ADDRESS
+        value: "0x8D62634539BF8aAf86f0910a34a69f3170FCf7d3"
+      - key: VITE_POOL_DEPLOY_BLOCK
+        value: "96770565"
+    routes:
+      # /app, /docs and the other pages are drawn by the app itself: every path without a real file gets
+      # index.html. Render never rewrites a path where a file exists, so /assets/* is served as-is.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      # No other website may show this app inside a frame, so a hidden frame can't trick a visitor into
+      # clicking Approve or Borrow ("clickjacking").
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
